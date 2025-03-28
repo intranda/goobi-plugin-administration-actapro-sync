@@ -1,6 +1,77 @@
-<config_plugin>
-	
-	<!-- configuration item as sample -->
-	<value>sample value from config file</value>
-	
-</config_plugin>
+<config>
+    <authentication>
+        <authServiceUrl>http://localhost:8080/AuthService-ACTApro/oauth2/token</authServiceUrl>
+        <authServiceHeader>Authorization: Basic ABCDEFGEHIJKLMNOPQRSXYZ</authServiceHeader>
+        <authServiceUsername>user</authServiceUsername>
+        <authServicePassword>password</authServicePassword>
+    </authentication>   
+
+    <connectorUrl>http://localhost:8080/ACTApro-connector/</connectorUrl>
+
+
+    <eadIdField>recordid</eadIdField>
+    
+    <!-- archiveName: name of the goobi archive -->
+    <!-- actaproId: id of the actapro root node -->
+    <inventory archiveName="testarchiv" actaproId="Arch    7c9e3ee0-4d72-4382-af1a-4fdf740d9d6e" />
+    <inventory archiveName="Wotruba.xml" actaproId="Arch    4c5165ef-3e51-453c-b949-f0296f3726d0" />
+
+
+    <metadata>
+    
+    <!-- 
+    in case of metadata with subfields like
+       {
+            "type": "Listsource_Beteiligte_Personen_RDA_Funktion",
+            "fields": [
+              {
+                "type": "Listsource_Value",
+                "value": "Übersetzer"
+              }
+            ]
+          }
+    configure groupType with the main type and type with the subfield type ( type="Listsource_Value" groupType="Listsource_Beteiligte_Personen_RDA_Funktion" ). 
+    
+    
+    
+    Without subfields, use only the type attribute (type="Vz_Bestellsignatur" groupType="")
+          {
+            "type": "Vz_Bestellsignatur",
+            "value": " (Test Signatur), A 6"
+          }
+    
+    
+    eadArea: allowed values are 1-7:
+                        * 1: metadata for Identity Statement Area 
+                        * 2: Context Area 
+                        * 3: Content and Structure Area
+                        * 4: Condition of Access and Use Area
+                        * 5: Allied Materials Area
+                        * 6: Note Area
+                        * 7: Description Control Area
+    
+    To import metadata into a group, use the attributes eadGroup="group name" eadField="metadata within group", they must match the name attribute in plugin_intranda_administration_archive_management.xml
+    
+    For regular metadata use only eadField
+    -->
+    
+        <field type="St_Entha" eadGroup="" eadField="scopecontent" eadArea="3"></field>
+        <field type="Vz_Provenienz" groupType="Vz_Provenienz_Gp" eadGroup="accruals" eadField="accruals_head" eadArea="3"></field>
+        <field type="Vz_Provenienz_Index" groupType="Vz_Provenienz_Gp"  eadGroup="accruals" eadField="accruals_p" eadArea="3"></field>
+        <field type="Vz_Bestellsignatur" eadGroup="" eadField="Shelfmark" eadArea="1"></field>
+        <field type="Vz_Umfang" eadGroup="" eadField="physdescstructured" eadArea="1"></field>
+    </metadata>
+
+
+    <!-- map a document type (actapro) to a node type/icon (archive) from the configured list in plugin_intranda_administration_archive_management.xml -->
+    <nodeTypes>
+      <type actaPro="Arch" node="archive" />
+      <type actaPro="Best" node="inventory" />
+      <type actaPro="Tekt" node="tectonics" />
+      <type actaPro="Klas" node="folder" />
+      <type actaPro="Ser" node="folder" />
+      <type actaPro="Vz" node="file" />
+    </nodeTypes>
+
+
+</config>

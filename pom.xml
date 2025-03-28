@@ -12,6 +12,7 @@
   <modules>
     <module>module-base</module>
     <module>module-gui</module>
+    <module>module-lib</module>
   </modules>
   <repositories>
     <repository>
@@ -26,5 +27,13 @@
       <version>${project.version}</version>
       <classifier>classes</classifier>
     </dependency>
+    
+        <dependency>
+  <groupId>io.goobi.workflow.plugin</groupId>
+  <artifactId>plugin-administration-archive-management-lib</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+
+    
   </dependencies>
 </project>

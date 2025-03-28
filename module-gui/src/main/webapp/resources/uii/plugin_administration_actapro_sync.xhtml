@@ -1,40 +1,115 @@
-<ui:composition xmlns="http://www.w3.org/1999/xhtml"
-	xmlns:ui="http://xmlns.jcp.org/jsf/facelets"
-	xmlns:composite="http://xmlns.jcp.org/jsf/composite"
-	xmlns:h="http://xmlns.jcp.org/jsf/html"
-	xmlns:f="http://xmlns.jcp.org/jsf/core"
-	xmlns:intranda="http://xmlns.jcp.org/jsf/composite/composites"
-	xmlns:pt="http://xmlns.jcp.org/jsf/passthrough"
-	xmlns:p="http://primefaces.org/ui"
+<ui:composition
+    xmlns="http://www.w3.org/1999/xhtml"
+    xmlns:ui="http://xmlns.jcp.org/jsf/facelets"
+    xmlns:composite="http://xmlns.jcp.org/jsf/composite"
+    xmlns:h="http://xmlns.jcp.org/jsf/html"
+    xmlns:f="http://xmlns.jcp.org/jsf/core"
+    xmlns:intranda="http://xmlns.jcp.org/jsf/composite/composites"
+    xmlns:pt="http://xmlns.jcp.org/jsf/passthrough"
+    xmlns:p="http://primefaces.org/ui"
     xmlns:button="http://goobi.io/button"
     xmlns:section="http://goobi.io/section">
-	<h:panelGroup>
-		<div class="row">
-			<div class="col-sm-12">
-				<section:section type="outline">
-					<section:header
-						icon="plug"
-						title="msgs[AdministrationForm.administrationPlugin.title]" />
-					<h:panelGroup
-						rendered="#{!LoginForm.hasRole('Plugin_administration_actapro_sync')} wow">
-						<h:outputText
-							styleClass="alert alert-danger"
-							value="#{msgs.plugin_administration_missingPermission} Plugin_administration_actapro_sync"></h:outputText>
-					</h:panelGroup>
-					<h:form id="actionForm" rendered="#{LoginForm.hasRole('Plugin_administration_actapro_sync')}">
-						<section:body>
-							hello adminstration plugin: #{AdministrationForm.administrationPlugin.value}
-						</section:body>
-						<section:footer>
-							<button:row>
-								<span class="btn btn-blank">
-									Form action
-								</span>
-							</button:row>
-						</section:footer>
-					</h:form>
-				</section:section>
-			</div>
-		</div>
-	</h:panelGroup>
+    <h:panelGroup>
+        <div class="row">
+            <div class="col-sm-12">
+                <section:section type="outline">
+                    <section:header
+                        icon="plug"
+                        title="#{msgs.intranda_administration_actapro_sync}" />
+                    <h:panelGroup rendered="#{!LoginForm.hasRole('Plugin_administration_actapro_sync')}">
+                        <h:outputText
+                            styleClass="alert alert-danger"
+                            value="#{msgs.plugin_administration_missingPermission} Plugin_administration_actapro_sync"></h:outputText>
+                    </h:panelGroup>
+                    <h:form
+                        id="actionForm"
+                        rendered="#{LoginForm.hasRole('Plugin_administration_actapro_sync')}">
+                        <section:body>
+                            <!-- list configured catalogues -->
+                            <div class="gw-table">
+                                <div class="gw-table__wrapper">
+                                    <table
+                                        role="grid"
+                                        class="table table-bordered table-hover">
+                                        <thead>
+                                            <tr role="row">
+                                                <intranda:columnheader
+                                                    value="#{msgs.name}"
+                                                    sortable="false" />
+
+                                                <intranda:columnheader
+                                                    value="#{msgs.actaproid}"
+                                                    sortable="false" />
+                                                <th
+                                                    scope="col"
+                                                    role="columnheader"
+                                                    class="header__buttons header__col-xxl">#{msgs.auswahl}</th>
+                                            </tr>
+                                        </thead>
+                                        <ui:repeat
+                                            var="db"
+                                            value="#{AdministrationForm.administrationPlugin.configuredInventories}">
+                                            <tr role="row">
+                                                <td class="align-top">
+                                                    <h:outputText value="#{db.one}" />
+                                                </td>
+                                                <td class="align-top">
+                                                    <h:outputText styleClass="white-space-pre" value="#{db.two}" />
+                                                </td>
+                                                <td>
+                                                    <div class="gw-table__actions__container">
+                                                        <h:commandLink
+                                                            styleClass="btn btn-blank"
+                                                            action="#{AdministrationForm.administrationPlugin.downloadFromActaPro}">
+                                                            <f:passThroughAttribute
+                                                                name="data-bs-toggle"
+                                                                value="tooltip" />
+                                                            <f:passThroughAttribute
+                                                                name="title"
+                                                                value="#{msgs.plugin_administration_downloadFromActaPro}" />
+                                                            <f:setPropertyActionListener
+                                                                value="#{db}"
+                                                                target="#{AdministrationForm.administrationPlugin.database}" />
+                                                            <span
+                                                                class="fa fa-download"
+                                                                aria-hidden="true"></span>
+                                                        </h:commandLink>
+
+
+                                                        <h:commandLink
+                                                            styleClass="btn btn-blank"
+                                                            action="#{AdministrationForm.administrationPlugin.uploadToActaPro}">
+                                                            <f:passThroughAttribute
+                                                                name="data-bs-toggle"
+                                                                value="tooltip" />
+                                                            <f:passThroughAttribute
+                                                                name="title"
+                                                                value="#{msgs.plugin_administration_uploadToActaPro}" />
+                                                            <f:setPropertyActionListener
+                                                                value="#{db}"
+                                                                target="#{AdministrationForm.administrationPlugin.database}" />
+                                                            <span
+                                                                class="fa fa-upload"
+                                                                aria-hidden="true"></span>
+                                                        </h:commandLink>
+
+
+                                                    </div>
+                                                </td>
+                                            </tr>
+
+
+
+                                        </ui:repeat>
+                                    </table>
+                                </div>
+                            </div>
+                        </section:body>
+                        <section:footer>
+                        </section:footer>
+                    </h:form>
+                </section:section>
+            </div>
+        </div>
+    </h:panelGroup>
 </ui:composition>
