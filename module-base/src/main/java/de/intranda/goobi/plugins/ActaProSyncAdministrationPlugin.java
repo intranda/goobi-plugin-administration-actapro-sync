@@ -86,14 +86,17 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin {
     private StringPair database;
 
     // authentication
-    String authServiceUrl;
-    String authServiceHeader;
-    String authServiceUsername;
-    String authServicePassword;
+    private String authServiceUrl;
+    private String authServiceHeader;
+    private String authServiceUsername;
+    private String authServicePassword;
 
-    String connectorUrl;
+    private String connectorUrl;
 
-    String identifierFieldName;
+    private String identifierFieldName;
+
+    private String documentOwner;
+
     @Getter
     private transient ArchiveManagementConfiguration config;
 
@@ -145,6 +148,8 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin {
         connectorUrl = actaProConfig.getString("/connectorUrl");
 
         identifierFieldName = actaProConfig.getString("/eadIdField");
+
+        documentOwner = actaProConfig.getString("/documentOwner", "ACTAPRO");
 
         metadataFields = new ArrayList<>();
 
@@ -248,7 +253,8 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin {
                             Integer parentEntryId = ArchiveManagementManager.findNodeById(identifierFieldName, parentNodeId);
                             if (parentEntryId == null) {
                                 // node has been changed to a new parent node that does not yet exist
-                                // TODO this case should not be possible because the new parent node is included in the document list before the current node and was created at this point
+                                // TODO this case should not be possible because the new parent node is included in the
+                                // document list before the current node and was created at this point
                             } else if (parentEntryId.intValue() != parentNode.getDatabaseId()) {
                                 // node has a different parent
 
@@ -468,7 +474,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin {
         List<IEadEntry> allNodes = rootElement.getAllNodes();
         try (Client client = ClientBuilder.newClient()) {
             AuthenticationToken token = authenticate(client);
-            for (IEadEntry entry : allNodes) { // TODO Ref_Type ???
+            for (IEadEntry entry : allNodes) {
 
                 NodeInitializer.initEadNodeWithMetadata(entry, getConfig().getConfiguredFields());
 
@@ -558,8 +564,8 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin {
 
                     // create required fields:
 
-                    doc.setOwnerId("ACTAPRO"); // TODO config?
-                    doc.setCreatorID("ACTAPRO");
+                    doc.setOwnerId(documentOwner);
+                    doc.setCreatorID(documentOwner);
                     doc.setCreationDate(dateFormatter.format(LocalDateTime.now()));
                     doc.setChangeDate(dateFormatter.format(LocalDateTime.now()));
 
@@ -907,7 +913,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin {
 
             Response response = builder.post(Entity.entity(searchRequest, MediaType.APPLICATION_JSON));
 
-            if (response.getStatus() > 0) {
+            if (200 == response.getStatus()) {
 
                 SearchResultPage srp = response.readEntity(SearchResultPage.class);
                 List<Map<String, String>> contentMap = srp.getContent();
@@ -925,7 +931,8 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin {
                 currentPage++;
 
             } else {
-                // TODO handle wrong status codes
+                ErrorResponse error = response.readEntity(ErrorResponse.class);
+                log.error("Search error, status: {}, text: {} ", error.getStatus(), error.getMessage());
                 isLast = true;
             }
         }
@@ -954,7 +961,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin {
         builder.header("Authorization", "Bearer " + token.getAccessToken());
 
         Response response = builder.get();
-        if (response.getStatus() > 0) {
+        if (200 == response.getStatus()) {
 
             Document doc = response.readEntity(Document.class);
             log.trace("DocKey: {}", doc.getDocKey());
@@ -1030,7 +1037,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin {
         builder.header("Accept", "application/json");
         builder.header("Authorization", "Bearer " + token.getAccessToken());
         Response response = builder.put(Entity.entity(doc, MediaType.APPLICATION_JSON));
-        if (response.getStatus() > 199 && response.getStatus() < 400) {
+        if (200 == response.getStatus()) {
             return response.readEntity(Document.class);
         } else {
             ErrorResponse error = response.readEntity(ErrorResponse.class);
