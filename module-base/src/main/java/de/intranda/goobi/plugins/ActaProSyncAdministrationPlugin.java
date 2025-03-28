@@ -77,6 +77,8 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin {
     private String gui = "/uii/plugin_administration_actapro_sync.xhtml";
 
     private boolean completeSearch = true;
+    private String startDate = "2023-04-14T15:33:44Z";
+    private String endDate = "2025-01-01T00:00:00Z";
 
     @Getter
     private List<StringPair> configuredInventories;
@@ -890,8 +892,15 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin {
             filter.fieldName("crdate");
             filter.setOperator(OperatorEnum.GREATER_THAN_OR_EQUAL_TO);
             // TODO get from config, TODO update config with new timestamp after successful search
-            filter.fieldValue("2023-04-14T15:33:44Z");
+            filter.fieldValue(startDate);
             searchRequest.addFiltersItem(filter);
+
+            if (StringUtils.isNotBlank(endDate)) {
+                filter.fieldName("crdate");
+                filter.setOperator(OperatorEnum.LESS_THAN_OR_EQUAL_TO);
+                filter.fieldValue(endDate);
+                searchRequest.addFiltersItem(filter);
+            }
         }
         searchRequest.addDocumentTypesItem("Arch");
         searchRequest.addDocumentTypesItem("Best");
