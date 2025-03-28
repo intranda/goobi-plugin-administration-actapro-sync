@@ -1,0 +1,40 @@
+<ui:composition xmlns="http://www.w3.org/1999/xhtml"
+	xmlns:ui="http://xmlns.jcp.org/jsf/facelets"
+	xmlns:composite="http://xmlns.jcp.org/jsf/composite"
+	xmlns:h="http://xmlns.jcp.org/jsf/html"
+	xmlns:f="http://xmlns.jcp.org/jsf/core"
+	xmlns:intranda="http://xmlns.jcp.org/jsf/composite/composites"
+	xmlns:pt="http://xmlns.jcp.org/jsf/passthrough"
+	xmlns:p="http://primefaces.org/ui"
+    xmlns:button="http://goobi.io/button"
+    xmlns:section="http://goobi.io/section">
+	<h:panelGroup>
+		<div class="row">
+			<div class="col-sm-12">
+				<section:section type="outline">
+					<section:header
+						icon="plug"
+						title="msgs[AdministrationForm.administrationPlugin.title]" />
+					<h:panelGroup
+						rendered="#{!LoginForm.hasRole('Plugin_administration_kick_start')} wow">
+						<h:outputText
+							styleClass="alert alert-danger"
+							value="#{msgs.plugin_administration_missingPermission} Plugin_administration_kick_start"></h:outputText>
+					</h:panelGroup>
+					<h:form id="actionForm" rendered="#{LoginForm.hasRole('Plugin_administration_kick_start')}">
+						<section:body>
+							hello adminstration plugin: #{AdministrationForm.administrationPlugin.value}
+						</section:body>
+						<section:footer>
+							<button:row>
+								<span class="btn btn-blank">
+									Form action
+								</span>
+							</button:row>
+						</section:footer>
+					</h:form>
+				</section:section>
+			</div>
+		</div>
+	</h:panelGroup>
+</ui:composition>
