@@ -113,7 +113,7 @@
                 icon="list"
                 title="#{msgs.plugin_intranda_workflow_log}" />
             <section:body>
-                <ol
+                <ol jsf:id="logs"
                     role="list"
                     class="feed">
                     <ui:repeat
@@ -132,9 +132,6 @@
         <o:socket
             channel="adminPluginPush"
             scope="session">
-            <f:ajax
-                event="update"
-                render="myform" />
             <f:ajax
                 event="update"
                 render="logs" />
