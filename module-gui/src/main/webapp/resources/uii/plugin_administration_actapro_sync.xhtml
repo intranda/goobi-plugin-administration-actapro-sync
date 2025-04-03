@@ -43,20 +43,47 @@
                     var="var"
                     hidePleaseSelectMessage="false" />
 
-                <intranda:formInputText
-                    id="startDate"
-                    name="startDate"
-                    label="#{msgs.startdate}"
-                    help="#{msgs.startdate}"
-                    field="#{AdministrationForm.administrationPlugin.startDate}"
-                    required="false" />
-                <intranda:formInputText
-                    id="endDate"
-                    name="endDate"
-                    label="#{msgs.enddate}"
-                    help="#{msgs.enddate}"
-                    field="#{AdministrationForm.administrationPlugin.endDate}"
-                    required="false" />
+                <div class="row">
+                    <div class="col-12 col-md-3">
+                        <intranda:formLabel
+                            label="#{msgs.startdate}"
+                            labelFor="startDate" />
+                    </div>
+                    <div class="col-12 col-md-9">
+                        <h:inputText
+                            id="startDate"
+                            styleClass="form-control form__input"
+                            value="#{AdministrationForm.administrationPlugin.startDate}"
+                            required="false"
+                            readonly="false"
+                            disabled="false">
+                            <f:convertDateTime type="localDate" />
+                        </h:inputText>
+                    </div>
+                </div>
+                
+                
+                <div class="row">
+                    <div class="col-12 col-md-3">
+                        <intranda:formLabel
+                            label="#{msgs.enddate}"
+                            labelFor="endDate" />
+                    </div>
+                    <div class="col-12 col-md-9">
+                        <h:inputText
+                            id="endDate"
+                            styleClass="form-control form__input"
+                            value="#{AdministrationForm.administrationPlugin.endDate}"
+                            required="false"
+                            readonly="false"
+                            disabled="false">
+                            <f:convertDateTime type="localDate" />
+                        </h:inputText>
+                    </div>
+                </div>
+
+
+
 
 
                 <div class="form-actions">

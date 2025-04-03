@@ -3,6 +3,7 @@ package de.intranda.goobi.plugins;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -82,10 +83,14 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
 
     @Getter
     @Setter
-    private String startDate = "2023-04-14T15:33:44Z";
+    private LocalDate startDate = LocalDate.now();
+
+    //    @Getter
+    //    @Setter
+    //    private String startDate = "2023-04-14T15:33:44Z";
     @Getter
     @Setter
-    private String endDate = "2025-01-01T00:00:00Z";
+    private LocalDate endDate;
 
     @Getter
     private List<String> configuredInventories;
@@ -115,7 +120,9 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
 
     private transient Map<String, INodeType> nodes;
 
-    private DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss:SSS");
+    private DateTimeFormatter documentDateFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss:SSS");
+
+    private DateTimeFormatter requestDateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
     private long lastPush = System.currentTimeMillis();
 
@@ -630,8 +637,8 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
 
                     doc.setOwnerId(documentOwner);
                     doc.setCreatorID(documentOwner);
-                    doc.setCreationDate(dateFormatter.format(LocalDateTime.now()));
-                    doc.setChangeDate(dateFormatter.format(LocalDateTime.now()));
+                    doc.setCreationDate(documentDateFormatter.format(LocalDateTime.now()));
+                    doc.setChangeDate(documentDateFormatter.format(LocalDateTime.now()));
 
                     // insert as new doc
                     doc = createDocument(client, token, parentDocKey, doc);
@@ -947,20 +954,20 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
         DocumentSearchParams searchRequest = new DocumentSearchParams();
 
         searchRequest.query("*");
-        if (StringUtils.isNotBlank(startDate)) {
+        if (startDate != null) {
             searchRequest.getFields().add("crdate");
 
             DocumentSearchFilter filter = new DocumentSearchFilter();
             filter.fieldName("crdate");
             filter.setOperator(OperatorEnum.GREATER_THAN_OR_EQUAL_TO);
-
-            filter.fieldValue(startDate);
+            filter.fieldValue(requestDateFormatter.format(startDate) + "T00:00:00Z");
             searchRequest.addFiltersItem(filter);
 
-            if (StringUtils.isNotBlank(endDate)) {
+            if (endDate != null) {
+                filter = new DocumentSearchFilter();
                 filter.fieldName("crdate");
                 filter.setOperator(OperatorEnum.LESS_THAN_OR_EQUAL_TO);
-                filter.fieldValue(endDate);
+                filter.fieldValue(requestDateFormatter.format(endDate) + "T23:59:59Z");
                 searchRequest.addFiltersItem(filter);
             }
         }
