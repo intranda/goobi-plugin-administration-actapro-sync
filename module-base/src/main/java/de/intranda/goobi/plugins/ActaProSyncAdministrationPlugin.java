@@ -10,8 +10,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Queue;
 import java.util.UUID;
 
+import org.apache.commons.collections4.queue.CircularFifoQueue;
 import org.apache.commons.configuration.ConfigurationException;
 import org.apache.commons.configuration.HierarchicalConfiguration;
 import org.apache.commons.configuration.XMLConfiguration;
@@ -24,9 +26,10 @@ import org.goobi.interfaces.IMetadataGroup;
 import org.goobi.interfaces.INodeType;
 import org.goobi.interfaces.IValue;
 import org.goobi.model.ExtendendValue;
-import org.goobi.production.cli.helper.StringPair;
 import org.goobi.production.enums.PluginType;
 import org.goobi.production.plugin.interfaces.IAdministrationPlugin;
+import org.goobi.production.plugin.interfaces.IPushPlugin;
+import org.omnifaces.cdi.PushContext;
 
 import com.fasterxml.jackson.core.exc.StreamWriteException;
 import com.fasterxml.jackson.databind.DatabindException;
@@ -38,6 +41,7 @@ import de.intranda.goobi.plugins.model.RecordGroup;
 import de.intranda.goobi.plugins.persistence.ArchiveManagementManager;
 import de.intranda.goobi.plugins.persistence.NodeInitializer;
 import de.sub.goobi.config.ConfigurationHelper;
+import de.sub.goobi.helper.Helper;
 import io.goobi.api.job.actapro.model.AuthenticationToken;
 import io.goobi.api.job.actapro.model.Document;
 import io.goobi.api.job.actapro.model.DocumentBlock;
@@ -63,7 +67,7 @@ import net.xeoh.plugins.base.annotations.PluginImplementation;
 
 @PluginImplementation
 @Log4j2
-public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin {
+public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, IPushPlugin {
 
     private static final long serialVersionUID = 2632106883746583247L;
 
@@ -76,16 +80,19 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin {
     @Getter
     private String gui = "/uii/plugin_administration_actapro_sync.xhtml";
 
-    private boolean completeSearch = true;
+    @Getter
+    @Setter
     private String startDate = "2023-04-14T15:33:44Z";
+    @Getter
+    @Setter
     private String endDate = "2025-01-01T00:00:00Z";
 
     @Getter
-    private List<StringPair> configuredInventories;
+    private List<String> configuredInventories;
 
     @Getter
     @Setter
-    private StringPair database;
+    private String database;
 
     // authentication
     private String authServiceUrl;
@@ -102,11 +109,21 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin {
     @Getter
     private transient ArchiveManagementConfiguration config;
 
+    private transient XMLConfiguration actaProConfig;
+
     private transient List<MetadataMapping> metadataFields;
 
     private transient Map<String, INodeType> nodes;
 
     private DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss:SSS");
+
+    private long lastPush = System.currentTimeMillis();
+
+    private PushContext pusher;
+    @Getter
+    private Queue<String> logQueue = new CircularFifoQueue<>(48);
+    @Getter
+    private boolean run = false;
 
     public ActaProSyncAdministrationPlugin() {
         log.trace("initialize plugin");
@@ -118,6 +135,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin {
     }
 
     private void readConfiguration() throws ConfigurationException {
+        logQueue.add("Start reading the configuration");
 
         try {
             config = new ArchiveManagementConfiguration();
@@ -126,7 +144,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin {
             log.error(e);
         }
 
-        XMLConfiguration actaProConfig = new XMLConfiguration(
+        actaProConfig = new XMLConfiguration(
                 ConfigurationHelper.getInstance().getConfigurationFolder() + "plugin_intranda_administration_actapro_sync.xml");
         actaProConfig.setListDelimiter('&');
         actaProConfig.setReloadingStrategy(new FileChangedReloadingStrategy());
@@ -137,10 +155,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin {
         List<HierarchicalConfiguration> hcl = actaProConfig.configurationsAt("/inventory");
 
         for (HierarchicalConfiguration hc : hcl) {
-            StringPair sp = new StringPair();
-            sp.setOne(hc.getString("@archiveName"));
-            sp.setTwo(hc.getString("@actaproId"));
-            configuredInventories.add(sp);
+            configuredInventories.add(hc.getString("@archiveName"));
         }
 
         authServiceUrl = actaProConfig.getString("/authentication/authServiceUrl");
@@ -189,200 +204,247 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin {
                 nodes.put(actaProType, defaultType);
             }
         }
+        logQueue.add("Configuration successfully read");
+
     }
 
     public void downloadFromActaPro() {
-        String databaseName = database.getOne();
-        String actaproId = database.getTwo();
+        if (run) {
+            // abort, if import is running
+            logQueue.add("Previous import is still running, abort");
+
+            return;
+        }
+
+        String databaseName = database;
+
+        if (StringUtils.isBlank(databaseName) || "null".equals(databaseName)) {
+            Helper.setFehlerMeldung("intranda_administration_actapro_noDatabase");
+            run = false;
+            return;
+        }
+        String actaproId = actaProConfig.getString("/inventory[@archiveName='" + database + "']/@actaproId");
 
         // check if database exist, load it
 
-        RecordGroup recordGroup = ArchiveManagementManager.getRecordGroupByTitle(databaseName);
-        IEadEntry rootElement = ArchiveManagementManager.loadRecordGroup(recordGroup.getId());
-        // otherwise create a new database
+        logQueue.add("Start import for inventory " + databaseName);
+        logQueue.add("ACTApro root element is " + actaproId);
 
-        // search for all actapro documents within configured id
-        List<Document> documents = null;
-        try (Client client = ClientBuilder.newClient()) {
-            AuthenticationToken token = authenticate(client);
-            documents = findDocuments(client, token, actaproId);
-        }
-        long start = System.currentTimeMillis();
-        if (!documents.isEmpty()) {
+        run = true;
+        Runnable runnable = () -> {
+            lastPush = System.currentTimeMillis();
 
-            log.debug("found {} documents to check", documents.size());
+            RecordGroup recordGroup = ArchiveManagementManager.getRecordGroupByTitle(databaseName);
+            if (recordGroup == null) {
+                Helper.setFehlerMeldung("intranda_administration_actapro_databaseNotFound");
+                run = false;
+                return;
+            }
 
-            for (Document doc : documents) {
-                // get doc id
-                String documentId = doc.getDocKey();
+            IEadEntry rootElement = ArchiveManagementManager.loadRecordGroup(recordGroup.getId());
 
-                String parentNodeId = null;
-                String docOrder = null;
-                for (DocumentField field : doc.getBlock().getFields()) {
-                    String fieldType = field.getType();
-                    if ("Ref_Gp".equals(fieldType)) {
-                        for (DocumentField subfield : field.getFields()) {
-                            if ("Ref_DocKey".equals(subfield.getType())) {
-                                parentNodeId = subfield.getValue();
-                            } else if ("Ref_DocOrder".equals(subfield.getType())) {
-                                docOrder = subfield.getValue();
+            updateLog("Archivemanagement database loaded ");
+
+            // search for all actapro documents within configured id
+            List<Document> documents = null;
+            try (Client client = ClientBuilder.newClient()) {
+                updateLog("Try to authenticate.");
+                AuthenticationToken token = authenticate(client);
+                updateLog("Authenticated.");
+
+                long start = System.currentTimeMillis();
+                documents = findDocuments(client, token, actaproId);
+                updateLog("Found " + documents.size() + " ACTApro documents to import.");
+
+                updateLog("Document collection duration: " + ((System.currentTimeMillis() - start) / 1000) + " sec");
+            }
+
+            long start = System.currentTimeMillis();
+            if (!documents.isEmpty()) {
+
+                for (Document doc : documents) {
+                    // get doc id
+                    String documentId = doc.getDocKey();
+                    String parentNodeId = null;
+                    String docOrder = null;
+                    for (DocumentField field : doc.getBlock().getFields()) {
+                        String fieldType = field.getType();
+                        if ("Ref_Gp".equals(fieldType)) {
+                            for (DocumentField subfield : field.getFields()) {
+                                if ("Ref_DocKey".equals(subfield.getType())) {
+                                    parentNodeId = subfield.getValue();
+                                } else if ("Ref_DocOrder".equals(subfield.getType())) {
+                                    docOrder = subfield.getValue();
+                                }
                             }
                         }
                     }
-                }
 
-                log.debug("Document id: {}", documentId);
+                    log.debug("Document id: {}", documentId);
+                    // find matching ead entry
+                    Integer entryId = ArchiveManagementManager.findNodeById(identifierFieldName, documentId);
+                    if (entryId != null) {
 
-                // find matching ead entry
-                Integer entryId = ArchiveManagementManager.findNodeById(identifierFieldName, documentId);
-                if (entryId != null) {
-                    IEadEntry entry = null;
-                    for (IEadEntry e : rootElement.getAllNodes()) {
-                        if (entryId.equals(e.getDatabaseId())) {
-                            entry = e;
-                            break;
+                        updateLog("Found node with with ACTApro ID '" + documentId + "', update existing node.");
+
+                        IEadEntry entry = null;
+                        for (IEadEntry e : rootElement.getAllNodes()) {
+                            if (entryId.equals(e.getDatabaseId())) {
+                                entry = e;
+                                break;
+                            }
                         }
-                    }
 
-                    NodeInitializer.initEadNodeWithMetadata(entry, getConfig().getConfiguredFields());
-                    String fingerprintBeforeImport = entry.getFingerprint();
+                        NodeInitializer.initEadNodeWithMetadata(entry, getConfig().getConfiguredFields());
+                        String fingerprintBeforeImport = entry.getFingerprint();
 
-                    // check if document still have the same parent node
-                    if (parentNodeId != null && docOrder != null) {
-                        IEadEntry parentNode = entry.getParentNode();
-                        // parentNode == null is the root element, should not be possible
-                        if (parentNode != null) {
-                            Integer parentEntryId = ArchiveManagementManager.findNodeById(identifierFieldName, parentNodeId);
-                            if (parentEntryId == null) {
-                                // node has been changed to a new parent node that does not yet exist
-                                // TODO this case should not be possible because the new parent node is included in the
-                                // document list before the current node and was created at this point
-                            } else if (parentEntryId.intValue() != parentNode.getDatabaseId()) {
-                                // node has a different parent
+                        // check if document still have the same parent node
+                        if (parentNodeId != null && docOrder != null) {
+                            IEadEntry parentNode = entry.getParentNode();
+                            // parentNode == null is the root element, should not be possible
+                            if (parentNode != null) {
+                                Integer parentEntryId = ArchiveManagementManager.findNodeById(identifierFieldName, parentNodeId);
+                                if (parentEntryId == null) {
+                                    // node has been changed to a new parent node that does not yet exist
+                                    // TODO this case should not be possible because the new parent node is included in the
+                                    // document list before the current node and was created at this point
+                                } else if (parentEntryId.intValue() != parentNode.getDatabaseId()) {
+                                    // node has a different parent
 
-                                // remove element from old parent
-                                parentNode.getSubEntryList().remove(entry);
-                                // update order number of existing elements
-                                parentNode.reOrderElements();
-                                parentNode.updateHierarchy();
-                                List<IEadEntry> nodesToUpdate = parentNode.getAllNodes();
+                                    // remove element from old parent
+                                    parentNode.getSubEntryList().remove(entry);
+                                    // update order number of existing elements
+                                    parentNode.reOrderElements();
+                                    parentNode.updateHierarchy();
+                                    List<IEadEntry> nodesToUpdate = parentNode.getAllNodes();
 
-                                // find new parent node
-                                IEadEntry newParentNode = null;
+                                    // find new parent node
+                                    IEadEntry newParentNode = null;
+                                    for (IEadEntry e : rootElement.getAllNodes()) {
+                                        if (e.getDatabaseId().equals(parentEntryId)) {
+                                            newParentNode = e;
+                                            break;
+                                        }
+                                    }
+                                    entry.setParentNode(newParentNode);
+                                    newParentNode.addSubEntry(entry);
+                                    entry.setOrderNumber(Integer.parseInt(docOrder));
+                                    // move to correct position within the parent
+
+                                    newParentNode.sortElements();
+                                    newParentNode.updateHierarchy();
+
+                                    nodesToUpdate.addAll(newParentNode.getAllNodes());
+
+                                    ArchiveManagementManager.updateNodeHierarchy(recordGroup.getId(), nodesToUpdate);
+
+                                }
+                            }
+                        }
+
+                        // parse document, get metadata fields
+                        parseDocumentMetadata(doc, entry);
+
+                        String fingerprintAfterImport = entry.getFingerprint();
+                        // save, if metadata was changed
+                        if (!fingerprintBeforeImport.equals(fingerprintAfterImport)) {
+                            ArchiveManagementManager.saveNode(recordGroup.getId(), entry);
+                        }
+
+                    } else {
+                        updateLog("Document with ID " + documentId + " does not exist, create new node.");
+
+                        String[] paths = doc.getPath().split(";");
+                        Integer lastElementId = null;
+                        for (String path : paths) {
+                            path = path.trim();
+                            Integer parentEntryId = ArchiveManagementManager.findNodeById(identifierFieldName, path);
+                            if (parentEntryId != null) {
+                                // ancestor element exists
+                                lastElementId = parentEntryId;
+                            } else {
+                                // ancestor element does not exist, create it as sub element of last existing node
+                                IEadEntry lastAncestorNode = null;
                                 for (IEadEntry e : rootElement.getAllNodes()) {
-                                    if (e.getDatabaseId().equals(parentEntryId)) {
-                                        newParentNode = e;
+                                    if (e.getDatabaseId().equals(lastElementId)) {
+                                        lastAncestorNode = e;
                                         break;
                                     }
                                 }
-                                entry.setParentNode(newParentNode);
-                                newParentNode.addSubEntry(entry);
-                                entry.setOrderNumber(Integer.parseInt(docOrder));
-                                // move to correct position within the parent
+                                try (Client client = ClientBuilder.newClient()) {
+                                    AuthenticationToken token = authenticate(client);
+                                    Document currentDoc = getDocumentByKey(client, token, path);
 
-                                newParentNode.sortElements();
-                                newParentNode.updateHierarchy();
+                                    int orderNumber = 0;
 
-                                nodesToUpdate.addAll(newParentNode.getAllNodes());
-
-                                ArchiveManagementManager.updateNodeHierarchy(recordGroup.getId(), nodesToUpdate);
-
-                            }
-                        }
-                    }
-
-                    // parse document, get metadata fields
-                    parseDocumentMetadata(doc, entry);
-
-                    String fingerprintAfterImport = entry.getFingerprint();
-                    // save, if metadata was changed
-                    if (!fingerprintBeforeImport.equals(fingerprintAfterImport)) {
-                        ArchiveManagementManager.saveNode(recordGroup.getId(), entry);
-                    }
-
-                } else {
-
-                    String[] paths = doc.getPath().split(";");
-                    Integer lastElementId = null;
-                    for (String path : paths) {
-                        path = path.trim();
-                        Integer parentEntryId = ArchiveManagementManager.findNodeById(identifierFieldName, path);
-                        if (parentEntryId != null) {
-                            // ancestor element exists
-                            lastElementId = parentEntryId;
-                        } else {
-                            // ancestor element does not exist, create it as sub element of last existing node
-                            IEadEntry lastAncestorNode = null;
-                            for (IEadEntry e : rootElement.getAllNodes()) {
-                                if (e.getDatabaseId().equals(lastElementId)) {
-                                    lastAncestorNode = e;
-                                    break;
-                                }
-                            }
-                            try (Client client = ClientBuilder.newClient()) {
-                                AuthenticationToken token = authenticate(client);
-                                Document currentDoc = getDocumentByKey(client, token, path);
-
-                                int orderNumber = 0;
-
-                                for (DocumentField field : currentDoc.getBlock().getFields()) {
-                                    String fieldType = field.getType();
-                                    if ("Ref_Gp".equals(fieldType)) {
-                                        for (DocumentField subfield : field.getFields()) {
-                                            if ("Ref_DocOrder".equals(subfield.getType())) {
-                                                orderNumber = Integer.parseInt(subfield.getValue());
+                                    for (DocumentField field : currentDoc.getBlock().getFields()) {
+                                        String fieldType = field.getType();
+                                        if ("Ref_Gp".equals(fieldType)) {
+                                            for (DocumentField subfield : field.getFields()) {
+                                                if ("Ref_DocOrder".equals(subfield.getType())) {
+                                                    orderNumber = Integer.parseInt(subfield.getValue());
+                                                }
                                             }
                                         }
                                     }
-                                }
-                                EadEntry entry =
-                                        new EadEntry(orderNumber,
-                                                lastAncestorNode.getHierarchy() + 1);
-                                entry.setId("id_" + UUID.randomUUID());
+                                    EadEntry entry =
+                                            new EadEntry(orderNumber,
+                                                    lastAncestorNode.getHierarchy() + 1);
+                                    entry.setId("id_" + UUID.randomUUID());
 
-                                //  add all metadata from document
+                                    //  add all metadata from document
 
-                                entry.setLabel(currentDoc.getDocTitle());
+                                    entry.setLabel(currentDoc.getDocTitle());
 
-                                for (IMetadataField emf : config.getConfiguredFields()) {
-                                    if (emf.isGroup()) {
-                                        NodeInitializer.loadGroupMetadata(entry, emf, null);
-                                    } else if ("unittitle".equals(emf.getName())) {
-                                        List<IValue> titleData = new ArrayList<>();
-                                        titleData.add(new ExtendendValue(null, currentDoc.getDocTitle(), null, null));
-                                        IMetadataField toAdd = NodeInitializer.addFieldToEntry(entry, emf, titleData);
-                                        NodeInitializer.addFieldToNode(entry, toAdd);
-                                    } else if (emf.getName().equals(identifierFieldName)) {
-                                        List<IValue> idData = new ArrayList<>();
-                                        idData.add(new ExtendendValue(null, currentDoc.getDocKey(), null, null));
-                                        IMetadataField toAdd = NodeInitializer.addFieldToEntry(entry, emf, idData);
-                                        NodeInitializer.addFieldToNode(entry, toAdd);
-                                    } else {
-                                        IMetadataField toAdd = NodeInitializer.addFieldToEntry(entry, emf, null);
-                                        NodeInitializer.addFieldToNode(entry, toAdd);
+                                    for (IMetadataField emf : config.getConfiguredFields()) {
+                                        if (emf.isGroup()) {
+                                            NodeInitializer.loadGroupMetadata(entry, emf, null);
+                                        } else if ("unittitle".equals(emf.getName())) {
+                                            List<IValue> titleData = new ArrayList<>();
+                                            titleData.add(new ExtendendValue(null, currentDoc.getDocTitle(), null, null));
+                                            IMetadataField toAdd = NodeInitializer.addFieldToEntry(entry, emf, titleData);
+                                            NodeInitializer.addFieldToNode(entry, toAdd);
+                                        } else if (emf.getName().equals(identifierFieldName)) {
+                                            List<IValue> idData = new ArrayList<>();
+                                            idData.add(new ExtendendValue(null, currentDoc.getDocKey(), null, null));
+                                            IMetadataField toAdd = NodeInitializer.addFieldToEntry(entry, emf, idData);
+                                            NodeInitializer.addFieldToNode(entry, toAdd);
+                                        } else {
+                                            IMetadataField toAdd = NodeInitializer.addFieldToEntry(entry, emf, null);
+                                            NodeInitializer.addFieldToNode(entry, toAdd);
+                                        }
                                     }
+                                    parseDocumentMetadata(currentDoc, entry);
+
+                                    entry.setNodeType(nodes.get(currentDoc.getType()));
+
+                                    // move to correct position within the parent
+                                    lastAncestorNode.addSubEntry(entry);
+                                    lastAncestorNode.sortElements();
+                                    lastAncestorNode.updateHierarchy();
+                                    entry.calculateFingerprint();
+
+                                    ArchiveManagementManager.saveNode(recordGroup.getId(), entry);
+                                    lastElementId = entry.getDatabaseId();
+                                    ArchiveManagementManager.updateNodeHierarchy(recordGroup.getId(), lastAncestorNode.getAllNodes());
                                 }
-                                parseDocumentMetadata(currentDoc, entry);
-
-                                entry.setNodeType(nodes.get(currentDoc.getType()));
-
-                                // move to correct position within the parent
-                                lastAncestorNode.addSubEntry(entry);
-                                lastAncestorNode.sortElements();
-                                lastAncestorNode.updateHierarchy();
-                                entry.calculateFingerprint();
-
-                                ArchiveManagementManager.saveNode(recordGroup.getId(), entry);
-                                lastElementId = entry.getDatabaseId();
-                                ArchiveManagementManager.updateNodeHierarchy(recordGroup.getId(), lastAncestorNode.getAllNodes());
                             }
                         }
                     }
                 }
             }
-        }
-        log.debug("Import duration: " + (System.currentTimeMillis() - start));
-
+            updateLog("Import duration: " + ((System.currentTimeMillis() - start) / 1000) + " sec");
+            run = false;
+            try {
+                Thread.sleep(2000);
+            } catch (InterruptedException e) {
+                log.error(e);
+            }
+            if (pusher != null) {
+                pusher.send("update");
+            }
+        };
+        new Thread(runnable).start();
     }
 
     private void parseDocumentMetadata(Document doc, IEadEntry entry) {
@@ -466,7 +528,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin {
 
         // load database
 
-        String databaseName = database.getOne();
+        String databaseName = database;
 
         // check if database exist, load it
 
@@ -847,6 +909,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin {
      */
 
     public AuthenticationToken authenticate(Client client) {
+
         if (StringUtils.isBlank(authServiceHeader) || StringUtils.isBlank(authServiceHeader) || StringUtils.isBlank(authServiceUsername)
                 || StringUtils.isBlank(authServicePassword)) {
             log.error("Authentication failure, missing configuration");
@@ -884,14 +947,13 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin {
         DocumentSearchParams searchRequest = new DocumentSearchParams();
 
         searchRequest.query("*");
-        if (!completeSearch) {
+        if (StringUtils.isNotBlank(startDate)) {
             searchRequest.getFields().add("crdate");
-            searchRequest.getFields().add("chdate");
 
             DocumentSearchFilter filter = new DocumentSearchFilter();
             filter.fieldName("crdate");
             filter.setOperator(OperatorEnum.GREATER_THAN_OR_EQUAL_TO);
-            // TODO get from config, TODO update config with new timestamp after successful search
+
             filter.fieldValue(startDate);
             searchRequest.addFiltersItem(filter);
 
@@ -909,8 +971,9 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin {
         searchRequest.addDocumentTypesItem("Tekt");
         searchRequest.addDocumentTypesItem("Vz");
 
+        updateLog("Search for documents");
+
         List<Document> documents = new ArrayList<>();
-        long start = System.currentTimeMillis();
         // post request
         boolean isLast = false;
         int currentPage = 1;
@@ -938,15 +1001,17 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin {
 
                 isLast = srp.getLast();
                 currentPage++;
-
+                if (currentPage % 10 == 0 || isLast) {
+                    updateLog("Found " + documents.size() + " documents on " + currentPage + " page(s).");
+                }
             } else {
                 ErrorResponse error = response.readEntity(ErrorResponse.class);
                 log.error("Search error, status: {}, text: {} ", error.getStatus(), error.getMessage());
+                updateLog("Search error, status: " + error.getStatus() + ", text: " + error.getMessage());
                 isLast = true;
             }
         }
         log.debug("Found {} documents on {} pages.", documents.size(), currentPage);
-        log.debug("Duration: " + (System.currentTimeMillis() - start));
         return documents;
     }
 
@@ -1101,4 +1166,16 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin {
 
     }
 
+    @Override
+    public void setPushContext(PushContext pusher) {
+        this.pusher = pusher;
+    }
+
+    private void updateLog(String logmessage) {
+        logQueue.add(logmessage);
+        if (pusher != null && System.currentTimeMillis() - lastPush > 500) {
+            lastPush = System.currentTimeMillis();
+            pusher.send("update");
+        }
+    }
 }
