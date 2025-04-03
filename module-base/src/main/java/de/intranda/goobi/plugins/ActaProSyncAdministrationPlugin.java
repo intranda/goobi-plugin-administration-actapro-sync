@@ -142,7 +142,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
     }
 
     private void readConfiguration() throws ConfigurationException {
-        logQueue.add("Start reading the configuration");
+        updateLog("Start reading the configuration");
 
         try {
             config = new ArchiveManagementConfiguration();
@@ -211,14 +211,14 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                 nodes.put(actaProType, defaultType);
             }
         }
-        logQueue.add("Configuration successfully read");
+        updateLog("Configuration successfully read");
 
     }
 
     public void downloadFromActaPro() {
         if (run) {
             // abort, if import is running
-            logQueue.add("Previous import is still running, abort");
+            updateLog("Previous import is still running, abort");
 
             return;
         }
@@ -234,8 +234,8 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
 
         // check if database exist, load it
 
-        logQueue.add("Start import for inventory " + databaseName);
-        logQueue.add("ACTApro root element is " + actaproId);
+        updateLog("Start import for inventory " + databaseName);
+        updateLog("ACTApro root element is " + actaproId);
 
         run = true;
         Runnable runnable = () -> {
@@ -250,7 +250,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
 
             IEadEntry rootElement = ArchiveManagementManager.loadRecordGroup(recordGroup.getId());
 
-            updateLog("Archivemanagement database loaded ");
+            updateLog("Archivemanagement database loaded.");
 
             // search for all actapro documents within configured id
             List<Document> documents = null;
@@ -532,131 +532,164 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
     }
 
     public void uploadToActaPro() {
+        if (run) {
+            // abort, if import is running
+            logQueue.add("Previous export is still running, abort");
+            return;
+        }
 
         // load database
 
         String databaseName = database;
-
+        updateLog("Start export for inventory " + databaseName);
         // check if database exist, load it
+        run = true;
+        Runnable runnable = () -> {
+            lastPush = System.currentTimeMillis();
 
-        RecordGroup recordGroup = ArchiveManagementManager.getRecordGroupByTitle(databaseName);
-        IEadEntry rootElement = ArchiveManagementManager.loadRecordGroup(recordGroup.getId());
+            RecordGroup recordGroup = ArchiveManagementManager.getRecordGroupByTitle(databaseName);
+            if (recordGroup == null) {
+                Helper.setFehlerMeldung("intranda_administration_actapro_databaseNotFound");
+                run = false;
+                return;
+            }
+            updateLog("Archivemanagement database loaded.");
+            IEadEntry rootElement = ArchiveManagementManager.loadRecordGroup(recordGroup.getId());
 
-        List<IEadEntry> allNodes = rootElement.getAllNodes();
-        try (Client client = ClientBuilder.newClient()) {
-            AuthenticationToken token = authenticate(client);
-            for (IEadEntry entry : allNodes) {
+            List<IEadEntry> allNodes = rootElement.getAllNodes();
+            updateLog("Found " + allNodes.size() + " nodes to export.");
 
-                NodeInitializer.initEadNodeWithMetadata(entry, getConfig().getConfiguredFields());
+            try (Client client = ClientBuilder.newClient()) {
+                updateLog("Try to authenticate.");
+                AuthenticationToken token = authenticate(client);
+                updateLog("Authenticated.");
 
-                // check if id field exists
-                String nodeId = null;
-                for (IMetadataField emf : entry.getIdentityStatementAreaList()) {
-                    if (emf.getName().equals(identifierFieldName)) {
-                        nodeId = emf.getValues().get(0).getValue();
-                    }
-                }
-                if (StringUtils.isNotBlank(nodeId)) {
-                    // if yes -> find document
-                    Document doc = getDocumentByKey(client, token, nodeId);
-                    // check if parent is still the same
-                    updateParentDocument(entry, doc);
+                for (IEadEntry entry : allNodes) {
 
-                    // update doc title
-                    for (IMetadataField emf : entry.getIdentityStatementAreaList()) {
-                        if ("unittitle".equals(emf.getName())) {
-                            doc.setDocTitle(emf.getValues().get(0).getValue());
-                        }
-                    }
-
-                    if (writeMetadata(entry, doc)) {
-
-                        // update document
-                        updateDocument(client, token, doc);
-                    }
-
-                } else if (entry.getParentNode() != null) {
-                    // only sub elements are allowed, creating new root nodes is not supported
-
-                    // if not -> create new document
-                    Document doc = new Document();
-                    doc.setObject("document");
-
-                    // set  node type
-                    for (Entry<String, INodeType> e : nodes.entrySet()) {
-                        if (e.getValue().getNodeName().equals(entry.getNodeType().getNodeName())) {
-                            doc.setType(e.getKey());
-                        }
-                    }
-
-                    // set doc title
-                    for (IMetadataField emf : entry.getIdentityStatementAreaList()) {
-                        if ("unittitle".equals(emf.getName())) {
-                            doc.setDocTitle(emf.getValues().get(0).getValue());
-                        }
-                    }
-
-                    DocumentBlock block = new DocumentBlock();
-                    doc.setBlock(block);
-                    block.setType(doc.getType());
-
-                    String parentDocKey = null;
-                    IEadEntry parent = entry.getParentNode();
-                    NodeInitializer.initEadNodeWithMetadata(parent, getConfig().getConfiguredFields());
-                    for (IMetadataField emf : parent.getIdentityStatementAreaList()) {
-                        if (emf.getName().equals(identifierFieldName)) {
-                            parentDocKey = emf.getValues().get(0).getValue();
-                        }
-                    }
-
-                    // Ref_Gp group: order (Ref_DocOrder),parent (Ref_DocKey, Ref_Doctype), Ref_Type=P
-
-                    DocumentField refDocKeyField = new DocumentField();
-                    refDocKeyField.setType("Ref_DocKey");
-                    refDocKeyField.setValue(parentDocKey);
-                    block.addFieldsItem(refDocKeyField);
-
-                    DocumentField refDocOrderField = new DocumentField();
-                    refDocOrderField.setType("Ref_DocOrder");
-                    refDocOrderField.setValue(String.valueOf(entry.getOrderNumber()));
-                    block.addFieldsItem(refDocOrderField);
-
-                    for (Entry<String, INodeType> e : nodes.entrySet()) {
-                        if (e.getValue().getNodeName().equals(entry.getNodeType().getNodeName())) {
-                            DocumentField refDocTypeField = new DocumentField();
-                            refDocTypeField.setType("Ref_Doctype");
-                            refDocTypeField.setValue(e.getKey());
-                            block.addFieldsItem(refDocTypeField);
-                        }
-                    }
-
-                    // add metadata
-                    writeMetadata(entry, doc);
-
-                    // create required fields:
-
-                    doc.setOwnerId(documentOwner);
-                    doc.setCreatorID(documentOwner);
-                    doc.setCreationDate(documentDateFormatter.format(LocalDateTime.now()));
-                    doc.setChangeDate(documentDateFormatter.format(LocalDateTime.now()));
-
-                    // insert as new doc
-                    doc = createDocument(client, token, parentDocKey, doc);
-
-                    // get id from response document
-                    String newDocumentKey = doc.getDocKey();
-                    // save generated id
+                    NodeInitializer.initEadNodeWithMetadata(entry, getConfig().getConfiguredFields());
+                    updateLog("Node with id '" + entry.getId() + "' loaded.");
+                    // check if id field exists
+                    String nodeId = null;
                     for (IMetadataField emf : entry.getIdentityStatementAreaList()) {
                         if (emf.getName().equals(identifierFieldName)) {
-                            emf.getValues().get(0).setValue(newDocumentKey);
+                            nodeId = emf.getValues().get(0).getValue();
                         }
                     }
-                    ArchiveManagementManager.saveNode(recordGroup.getId(), entry);
+                    if (StringUtils.isNotBlank(nodeId)) {
+                        updateLog("Update existing ACTApro document, it has the ID " + nodeId);
 
+                        // if yes -> find document
+                        Document doc = getDocumentByKey(client, token, nodeId);
+                        // check if parent is still the same
+                        updateParentDocument(entry, doc);
+
+                        // update doc title
+                        for (IMetadataField emf : entry.getIdentityStatementAreaList()) {
+                            if ("unittitle".equals(emf.getName())) {
+                                doc.setDocTitle(emf.getValues().get(0).getValue());
+                            }
+                        }
+
+                        if (writeMetadata(entry, doc)) {
+
+                            // update document
+                            updateDocument(client, token, doc);
+                        }
+
+                    } else if (entry.getParentNode() != null) {
+                        // only sub elements are allowed, creating new root nodes is not supported
+                        updateLog("Node does not exist yet, create a new ACTApro document.");
+                        // if not -> create new document
+                        Document doc = new Document();
+                        doc.setObject("document");
+
+                        // set  node type
+                        for (Entry<String, INodeType> e : nodes.entrySet()) {
+                            if (e.getValue().getNodeName().equals(entry.getNodeType().getNodeName())) {
+                                doc.setType(e.getKey());
+                            }
+                        }
+
+                        // set doc title
+                        for (IMetadataField emf : entry.getIdentityStatementAreaList()) {
+                            if ("unittitle".equals(emf.getName())) {
+                                doc.setDocTitle(emf.getValues().get(0).getValue());
+                            }
+                        }
+
+                        DocumentBlock block = new DocumentBlock();
+                        doc.setBlock(block);
+                        block.setType(doc.getType());
+
+                        String parentDocKey = null;
+                        IEadEntry parent = entry.getParentNode();
+                        NodeInitializer.initEadNodeWithMetadata(parent, getConfig().getConfiguredFields());
+                        for (IMetadataField emf : parent.getIdentityStatementAreaList()) {
+                            if (emf.getName().equals(identifierFieldName)) {
+                                parentDocKey = emf.getValues().get(0).getValue();
+                            }
+                        }
+
+                        // Ref_Gp group: order (Ref_DocOrder),parent (Ref_DocKey, Ref_Doctype), Ref_Type=P
+
+                        DocumentField refDocKeyField = new DocumentField();
+                        refDocKeyField.setType("Ref_DocKey");
+                        refDocKeyField.setValue(parentDocKey);
+                        block.addFieldsItem(refDocKeyField);
+
+                        DocumentField refDocOrderField = new DocumentField();
+                        refDocOrderField.setType("Ref_DocOrder");
+                        refDocOrderField.setValue(String.valueOf(entry.getOrderNumber()));
+                        block.addFieldsItem(refDocOrderField);
+
+                        for (Entry<String, INodeType> e : nodes.entrySet()) {
+                            if (e.getValue().getNodeName().equals(entry.getNodeType().getNodeName())) {
+                                DocumentField refDocTypeField = new DocumentField();
+                                refDocTypeField.setType("Ref_Doctype");
+                                refDocTypeField.setValue(e.getKey());
+                                block.addFieldsItem(refDocTypeField);
+                            }
+                        }
+
+                        // add metadata
+                        writeMetadata(entry, doc);
+
+                        // create required fields:
+
+                        doc.setOwnerId(documentOwner);
+                        doc.setCreatorID(documentOwner);
+                        doc.setCreationDate(documentDateFormatter.format(LocalDateTime.now()));
+                        doc.setChangeDate(documentDateFormatter.format(LocalDateTime.now()));
+
+                        // insert as new doc
+                        doc = createDocument(client, token, parentDocKey, doc);
+
+                        // get id from response document
+                        String newDocumentKey = doc.getDocKey();
+                        // save generated id
+                        for (IMetadataField emf : entry.getIdentityStatementAreaList()) {
+                            if (emf.getName().equals(identifierFieldName)) {
+                                emf.getValues().get(0).setValue(newDocumentKey);
+                            }
+                        }
+                        ArchiveManagementManager.saveNode(recordGroup.getId(), entry);
+
+                    }
                 }
             }
-        }
 
+            updateLog("Export finished.");
+            run = false;
+            try {
+                Thread.sleep(2000);
+            } catch (InterruptedException e) {
+                log.error(e);
+            }
+            if (pusher != null) {
+                pusher.send("update");
+            }
+        };
+        new Thread(runnable).start();
     }
 
     private boolean writeMetadata(IEadEntry entry, Document doc) {
