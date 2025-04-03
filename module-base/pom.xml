@@ -3,8 +3,18 @@
   <parent>
     <groupId>io.goobi.workflow.plugin</groupId>
     <artifactId>plugin-administration-actapro-sync</artifactId>
-    <version>25.03-SNAPSHOT</version>
+    <version>25.03</version>
   </parent>
   <artifactId>plugin-administration-actapro-sync-base</artifactId>
   <packaging>jar</packaging>
+  
+    <dependencies>
+    <dependency>
+      <groupId>io.goobi.workflow.plugin</groupId>
+      <artifactId>plugin-administration-actapro-sync-lib</artifactId>
+      <version>25.03</version>
+      <scope>compile</scope>
+    </dependency>
+  </dependencies>
+  
 </project>

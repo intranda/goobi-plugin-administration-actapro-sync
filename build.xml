@@ -7,6 +7,7 @@
 		</exec>
 		<copy file="module-base/target/plugin-administration-actapro-sync-base.jar" todir="/opt/digiverso/goobi/plugins/administration/" overwrite="true"/>
 		<copy file="module-gui/target/plugin-administration-actapro-sync-gui.jar" todir="/opt/digiverso/goobi/plugins/GUI/" overwrite="true"/>
+        <copy file="module-lib/target/plugin-administration-actapro-sync-lib.jar" todir="/opt/digiverso/goobi/plugins/GUI/" overwrite="true"/>		
 	</target>
 
 </project>

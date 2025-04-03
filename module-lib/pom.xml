@@ -5,14 +5,6 @@
     <artifactId>plugin-administration-actapro-sync</artifactId>
     <version>25.03</version>
   </parent>
-  <artifactId>plugin-administration-actapro-sync-gui</artifactId>
+  <artifactId>plugin-administration-actapro-sync-lib</artifactId>
   <packaging>jar</packaging>
-  <build>
-    <resources>
-      <resource>
-        <targetPath>META-INF/resources</targetPath>
-        <directory>src/main/webapp/resources</directory>
-      </resource>
-    </resources>
-  </build>
 </project>
