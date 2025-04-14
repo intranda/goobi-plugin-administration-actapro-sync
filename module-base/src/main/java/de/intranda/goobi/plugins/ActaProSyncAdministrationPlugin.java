@@ -43,6 +43,7 @@ import de.intranda.goobi.plugins.persistence.ArchiveManagementManager;
 import de.intranda.goobi.plugins.persistence.NodeInitializer;
 import de.sub.goobi.config.ConfigurationHelper;
 import de.sub.goobi.helper.Helper;
+import io.goobi.api.job.actapro.model.ActaProApi;
 import io.goobi.api.job.actapro.model.AuthenticationToken;
 import io.goobi.api.job.actapro.model.Document;
 import io.goobi.api.job.actapro.model.DocumentBlock;
@@ -58,7 +59,6 @@ import jakarta.ws.rs.client.ClientBuilder;
 import jakarta.ws.rs.client.Entity;
 import jakarta.ws.rs.client.Invocation;
 import jakarta.ws.rs.client.WebTarget;
-import jakarta.ws.rs.core.Form;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import lombok.Getter;
@@ -256,7 +256,8 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
             List<Document> documents = null;
             try (Client client = ClientBuilder.newClient()) {
                 updateLog("Try to authenticate.");
-                AuthenticationToken token = authenticate(client);
+                AuthenticationToken token = ActaProApi.authenticate(client, authServiceHeader, authServiceUrl, authServiceUsername,
+                        authServicePassword);
                 updateLog("Authenticated.");
 
                 long start = System.currentTimeMillis();
@@ -379,8 +380,10 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                                     }
                                 }
                                 try (Client client = ClientBuilder.newClient()) {
-                                    AuthenticationToken token = authenticate(client);
-                                    Document currentDoc = getDocumentByKey(client, token, path);
+                                    AuthenticationToken token =
+                                            ActaProApi.authenticate(client, authServiceHeader, authServiceUrl, authServiceUsername,
+                                                    authServicePassword);
+                                    Document currentDoc = ActaProApi.getDocumentByKey(client, token, connectorUrl, path);
 
                                     int orderNumber = 0;
 
@@ -561,7 +564,8 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
 
             try (Client client = ClientBuilder.newClient()) {
                 updateLog("Try to authenticate.");
-                AuthenticationToken token = authenticate(client);
+                AuthenticationToken token = ActaProApi.authenticate(client, authServiceHeader, authServiceUrl, authServiceUsername,
+                        authServicePassword);
                 updateLog("Authenticated.");
 
                 for (IEadEntry entry : allNodes) {
@@ -579,7 +583,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                         updateLog("Update existing ACTApro document, it has the ID " + nodeId);
 
                         // if yes -> find document
-                        Document doc = getDocumentByKey(client, token, nodeId);
+                        Document doc = ActaProApi.getDocumentByKey(client, token, connectorUrl, nodeId);
                         // check if parent is still the same
                         updateParentDocument(entry, doc);
 
@@ -593,7 +597,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                         if (writeMetadata(entry, doc)) {
 
                             // update document
-                            updateDocument(client, token, doc);
+                            ActaProApi.updateDocument(client, token, connectorUrl, doc);
                         }
 
                     } else if (entry.getParentNode() != null) {
@@ -662,7 +666,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                         doc.setChangeDate(documentDateFormatter.format(LocalDateTime.now()));
 
                         // insert as new doc
-                        doc = createDocument(client, token, parentDocKey, doc);
+                        doc = ActaProApi.createDocument(client, token, connectorUrl, parentDocKey, doc);
 
                         // get id from response document
                         String newDocumentKey = doc.getDocKey();
@@ -670,8 +674,10 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                         for (IMetadataField emf : entry.getIdentityStatementAreaList()) {
                             if (emf.getName().equals(identifierFieldName)) {
                                 emf.getValues().get(0).setValue(newDocumentKey);
+                                // TODO: if process exists, write newDocumentKey to metadata
                             }
                         }
+
                         ArchiveManagementManager.saveNode(recordGroup.getId(), entry);
 
                     }
@@ -942,37 +948,6 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
     }
 
     /**
-     * Authenticate at the service
-     * 
-     * @param client
-     * @return
-     */
-
-    public AuthenticationToken authenticate(Client client) {
-
-        if (StringUtils.isBlank(authServiceHeader) || StringUtils.isBlank(authServiceHeader) || StringUtils.isBlank(authServiceUsername)
-                || StringUtils.isBlank(authServicePassword)) {
-            log.error("Authentication failure, missing configuration");
-            return null;
-        }
-
-        Form form = new Form();
-        form.param("username", authServiceUsername);
-        form.param("password", authServicePassword);
-        form.param("grant_type", "password");
-
-        WebTarget target = client.target(authServiceUrl);
-
-        Invocation.Builder builder = target.request();
-        builder.header("Accept", "application/json");
-        builder.header("Authorization", authServiceHeader);
-        Response response = builder.post(Entity.form(form));
-
-        return response.readEntity(AuthenticationToken.class);
-
-    }
-
-    /**
      * 
      * Find all documents created or modified after a given date
      *
@@ -1032,7 +1007,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                 for (Map<String, String> content : contentMap) {
                     if (content.get("path").startsWith(rootElementId)) {
                         String id = content.get("id");
-                        Document doc = getDocumentByKey(client, token, id);
+                        Document doc = ActaProApi.getDocumentByKey(client, token, connectorUrl, id);
                         doc.setPath(content.get("path"));
                         // only add documents from the selected archive
                         documents.add(doc);
@@ -1053,62 +1028,6 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
         }
         log.debug("Found {} documents on {} pages.", documents.size(), currentPage);
         return documents;
-    }
-
-    /**
-     * 
-     * get a single document with the given key
-     * 
-     * @param client
-     * @param token
-     * @param key
-     * @return
-     */
-
-    private Document getDocumentByKey(Client client, AuthenticationToken token, String key) {
-        if (token == null) {
-            return null;
-        }
-        WebTarget target = client.target(connectorUrl).path("document").path(key);
-        Invocation.Builder builder = target.request();
-        builder.header("Accept", "application/json");
-        builder.header("Authorization", "Bearer " + token.getAccessToken());
-
-        Response response = builder.get();
-        if (200 == response.getStatus()) {
-
-            Document doc = response.readEntity(Document.class);
-            log.trace("DocKey: {}", doc.getDocKey());
-            log.trace("type: {}", doc.getType());
-            log.trace("DocTitle: {}", doc.getDocTitle());
-            log.trace("CreatorID: {}", doc.getCreatorID());
-            log.trace("OwnerID: {}", doc.getOwnerId());
-            log.trace("CreationDate: {}", doc.getCreationDate());
-            log.trace("ChangeDate: {}", doc.getChangeDate());
-            log.trace("object: {}", doc.getObject());
-            DocumentBlock block = doc.getBlock();
-            log.trace("block type: {}", block.getType());
-
-            for (DocumentField field : block.getFields()) {
-
-                log.trace("*** {} ***", field.getType());
-                if (StringUtils.isNotBlank(field.getPlainValue())) {
-                    log.trace(field.getPlainValue());
-                }
-                if (StringUtils.isNotBlank(field.getValue())) {
-                    log.trace(field.getValue());
-                }
-                if (field.getFields() != null) {
-                    for (DocumentField subfield : field.getFields()) {
-                        log.trace("    {}: {}", subfield.getType(), subfield.getValue());
-                    }
-                }
-            }
-            return doc;
-        } else {
-            log.error("Status: {}, Error: {}", response.getStatus(), response.getStatusInfo().getReasonPhrase());
-            return null;
-        }
     }
 
     private void saveValue(MetadataMapping matchedMapping, String value, IMetadataField emf) {
@@ -1136,57 +1055,13 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
         }
     }
 
-    public Document updateDocument(Client client, AuthenticationToken token, Document doc) {
-        if (token == null) {
-            return null;
-        }
-
-        if (StringUtils.isBlank(doc.getDocKey())) {
-            // its a new document, call createDocument instead
-            return null;
-        }
-
-        WebTarget target = client.target(connectorUrl).path("document").path(doc.getDocKey());
-        Invocation.Builder builder = target.request();
-        builder.header("Accept", "application/json");
-        builder.header("Authorization", "Bearer " + token.getAccessToken());
-        Response response = builder.put(Entity.entity(doc, MediaType.APPLICATION_JSON));
-        if (200 == response.getStatus()) {
-            return response.readEntity(Document.class);
-        } else {
-            ErrorResponse error = response.readEntity(ErrorResponse.class);
-            System.out.println(error);
-
-            log.error("Status: {}, Error: {}", response.getStatus(), response.getStatusInfo().getReasonPhrase());
-            return null;
-        }
-    }
-
-    public Document createDocument(Client client, AuthenticationToken token, String parentDocKey, Document doc) {
-        if (token == null) {
-            return null;
-        }
-        WebTarget target = client.target(connectorUrl).path("document").queryParam("parentDocKey", parentDocKey).queryParam("format", "json");
-        Invocation.Builder builder = target.request();
-        builder.header("Accept", "application/json");
-        builder.header("Authorization", "Bearer " + token.getAccessToken());
-        Response response = builder.post(Entity.entity(doc, MediaType.APPLICATION_JSON));
-        if (200 == response.getStatus()) {
-            return response.readEntity(Document.class);
-        } else {
-            ErrorResponse error = response.readEntity(ErrorResponse.class);
-            System.out.println(error);
-            log.error("Status: {}, Error: {}", response.getStatus(), response.getStatusInfo().getReasonPhrase());
-            return null;
-        }
-    }
-
     public static void main(String[] args) throws StreamWriteException, DatabindException, FileNotFoundException, IOException {
 
         ActaProSyncAdministrationPlugin plugin = new ActaProSyncAdministrationPlugin();
         try (Client client = ClientBuilder.newClient()) {
-            AuthenticationToken token = plugin.authenticate(client);
-            Document doc = plugin.getDocumentByKey(client, token, "Vz      1ce4eedf-ed41-407c-bd09-c3c0d6d3c2f2");
+            AuthenticationToken token = ActaProApi.authenticate(client, plugin.authServiceHeader, plugin.authServiceUrl, plugin.authServiceUsername,
+                    plugin.authServicePassword);
+            Document doc = ActaProApi.getDocumentByKey(client, token, plugin.connectorUrl, "Vz      1ce4eedf-ed41-407c-bd09-c3c0d6d3c2f2");
 
             // change a field
 
@@ -1200,8 +1075,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
             mapper.writeValue(new FileOutputStream("/tmp/bla.json"), doc);
 
             // upload document
-            plugin.updateDocument(client, token, doc);
-
+            ActaProApi.updateDocument(client, token, plugin.connectorUrl, doc);
         }
 
     }
