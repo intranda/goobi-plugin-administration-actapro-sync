@@ -708,75 +708,8 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
             String value = getNodeMetadataVaue(mm, entry);
 
             // find documentField
-            DocumentField f = null;
-
-            for (DocumentField field : doc.getBlock().getFields()) {
-                String fieldType = field.getType();
-
-                if (StringUtils.isNoneBlank(mm.getJsonGroupType())) {
-                    if (mm.getJsonGroupType().equals(fieldType)) {
-                        for (DocumentField subfield : field.getFields()) {
-                            String subType = subfield.getType();
-                            if (subType.equals(mm.getJsonType())) {
-                                f = subfield;
-                            }
-                        }
-                    }
-                } else if (mm.getJsonType().equals(fieldType)) {
-                    f = field;
-                }
-            }
-            // change fields
-
-            if (value != null && f != null) {
-                // field exists in both instances, update plain_value/value
-                if (StringUtils.isNotBlank(f.getPlainValue())) {
-                    if (!value.equals(f.getPlainValue())) {
-                        f.setPlainValue(value);
-                        metadataChanged = true;
-                    }
-                } else if (!value.equals(f.getValue())) {
-                    f.setValue(value);
-                    metadataChanged = true;
-                }
-            } else if (value != null && f == null) {
-                // field is new in node, create new DocumentField
-                // check if group field is needed
-                if (StringUtils.isNoneBlank(mm.getJsonGroupType())) {
-                    DocumentField groupField = null;
-                    // re-use existing group field
-                    for (DocumentField gf : doc.getBlock().getFields()) {
-                        if (mm.getJsonGroupType().equals(gf.getType())) {
-                            groupField = gf;
-                            break;
-                        }
-                    }
-                    // or create it if its missing
-                    if (groupField == null) {
-                        groupField = new DocumentField();
-                        groupField.setType(mm.getJsonGroupType());
-                        doc.getBlock().addFieldsItem(groupField);
-                    }
-                    // add new field as sub field
-                    DocumentField df = new DocumentField();
-                    df.setType(mm.getJsonType());
-                    df.setValue(value);
-                    groupField.addFieldsItem(df);
-                } else {
-                    // add new field to block
-                    DocumentField df = new DocumentField();
-                    df.setType(mm.getJsonType());
-                    df.setValue(value);
-                    doc.getBlock().addFieldsItem(df);
-                }
+            if (ActaProApi.updateDocumentField(doc, mm, value)) {
                 metadataChanged = true;
-            } else if (value == null && f != null) {
-                // field was deleted in the node, remove DocumentField
-                doc.getBlock().getFields().remove(f);
-                metadataChanged = true;
-
-            } else if (value == null && f == null) {
-                // metadata does not exist on both sides, nothing to do
             }
 
         }
