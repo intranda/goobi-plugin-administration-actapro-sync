@@ -21,6 +21,7 @@ import org.apache.commons.configuration.XMLConfiguration;
 import org.apache.commons.configuration.reloading.FileChangedReloadingStrategy;
 import org.apache.commons.configuration.tree.xpath.XPathExpressionEngine;
 import org.apache.commons.lang3.StringUtils;
+import org.goobi.beans.Process;
 import org.goobi.interfaces.IEadEntry;
 import org.goobi.interfaces.IMetadataField;
 import org.goobi.interfaces.IMetadataGroup;
@@ -43,6 +44,8 @@ import de.intranda.goobi.plugins.persistence.ArchiveManagementManager;
 import de.intranda.goobi.plugins.persistence.NodeInitializer;
 import de.sub.goobi.config.ConfigurationHelper;
 import de.sub.goobi.helper.Helper;
+import de.sub.goobi.helper.exceptions.SwapException;
+import de.sub.goobi.persistence.managers.ProcessManager;
 import io.goobi.api.job.actapro.model.ActaProApi;
 import io.goobi.api.job.actapro.model.AuthenticationToken;
 import io.goobi.api.job.actapro.model.Document;
@@ -65,6 +68,10 @@ import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.log4j.Log4j2;
 import net.xeoh.plugins.base.annotations.PluginImplementation;
+import ugh.dl.DocStruct;
+import ugh.dl.Fileformat;
+import ugh.dl.Metadata;
+import ugh.exceptions.UGHException;
 
 @PluginImplementation
 @Log4j2
@@ -674,7 +681,40 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                         for (IMetadataField emf : entry.getIdentityStatementAreaList()) {
                             if (emf.getName().equals(identifierFieldName)) {
                                 emf.getValues().get(0).setValue(newDocumentKey);
-                                // TODO: if process exists, write newDocumentKey to metadata
+                                // if process exists, write newDocumentKey to metadata
+                                if (StringUtils.isNotBlank(entry.getGoobiProcessTitle())) {
+                                    Process goobiProcess = ProcessManager.getProcessByExactTitle(entry.getGoobiProcessTitle());
+                                    if (goobiProcess != null) {
+                                        try {
+                                            Fileformat ff = goobiProcess.readMetadataFile();
+                                            DocStruct logical = ff.getDigitalDocument().getLogicalDocStruct();
+                                            if (logical.getType().isAnchor()) {
+                                                logical = logical.getAllChildren().get(0);
+                                            }
+                                            // check if metadata already exists, update value
+                                            boolean metadataUpdated = false;
+                                            for (Metadata md : logical.getAllMetadata()) {
+                                                if (md.getType().getName().equals(emf.getMetadataName())) {
+                                                    md.setValue(newDocumentKey);
+                                                    metadataUpdated = true;
+                                                    break;
+                                                }
+                                            }
+
+                                            // or create a new field
+                                            if (!metadataUpdated) {
+                                                Metadata md = new Metadata(
+                                                        goobiProcess.getRegelsatz().getPreferences().getMetadataTypeByName(emf.getMetadataName()));
+                                                md.setValue(newDocumentKey);
+                                                logical.addMetadata(md);
+                                            }
+                                            goobiProcess.writeMetadataFile(ff);
+                                        } catch (UGHException | IOException | SwapException e1) {
+                                            log.error(e1);
+                                        }
+
+                                    }
+                                }
                             }
                         }
 
