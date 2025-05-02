@@ -137,6 +137,25 @@ public class ActaProApi {
         }
     }
 
+    public static String getJsonDocumentAsString(Client client, AuthenticationToken token, String connectorUrl, String key) {
+        if (token == null) {
+            return null;
+        }
+        WebTarget target = client.target(connectorUrl).path("document").path(key);
+        Invocation.Builder builder = target.request();
+        builder.header("Accept", "application/json");
+        builder.header("Authorization", "Bearer " + token.getAccessToken());
+
+        Response response = builder.get();
+        if (200 == response.getStatus()) {
+
+            return response.readEntity(String.class);
+        } else {
+            log.error("Status: {}, Error: {}", response.getStatus(), response.getStatusInfo().getReasonPhrase());
+            return null;
+        }
+    }
+
     public static boolean updateDocumentField(Document doc, MetadataMapping mm, String value) {
         boolean metadataChanged = false;
         DocumentField f = null;
