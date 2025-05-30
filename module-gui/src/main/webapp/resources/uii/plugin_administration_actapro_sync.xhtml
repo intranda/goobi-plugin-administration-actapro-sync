@@ -11,7 +11,16 @@
     xmlns:jsf="http://xmlns.jcp.org/jsf"
     xmlns:o="http://omnifaces.org/ui"
     xmlns:section="http://goobi.io/section">
-    <h:panelGroup>
+
+	<h:panelGroup
+	   rendered="#{!LoginForm.hasRole('Plugin_administration_actapro_sync')}"
+	   styleClass="color-box bg-hot text-white d-flex flex-row p-3">
+	   <h:outputText
+	       styleClass="fw-bold"
+	       value="#{msgs.plugin_administration_missingPermission} Plugin_administration_actapro_sync" />
+	</h:panelGroup>
+
+    <h:panelGroup rendered="#{LoginForm.hasRole('Plugin_administration_actapro_sync')}">
 
 
         <intranda:box
@@ -20,13 +29,9 @@
             boxType="primary"
             icon="fa fa-plug"
             id="selectionBox"
-            title="#{msgs[AdministrationForm.administrationPlugin.title]}">
+            title="#{msgs[AdministrationForm.administrationPlugin.title]}"
+            boxClass="mb-3">
 
-            <h:panelGroup rendered="#{!LoginForm.hasRole('Plugin_administration_actapro_sync')}">
-                <h:outputText
-                    styleClass="alert alert-danger"
-                    value="#{msgs.plugin_administration_missingPermission} Plugin_administration_actapro_sync"></h:outputText>
-            </h:panelGroup>
 
             <h:form
                 rendered="#{LoginForm.hasRole('Plugin_administration_arche_project_export')}"
@@ -90,7 +95,7 @@
                         title="#{msgs.plugin_administration_downloadFromActaPro}"
                         class="btn btn-blank">
                         <span
-                            class="fa fa-download"
+                            class="fa fa-download me-2"
                             aria-hidden="true"></span>
                         <h:outputText value="#{msgs.plugin_administration_downloadFromActaPro}" />
                     </button>
@@ -101,7 +106,7 @@
                         title="#{msgs.plugin_administration_uploadToActaPro}"
                         class="btn btn-blank">
                         <span
-                            class="fa fa-upload"
+                            class="fa fa-upload me-2"
                             aria-hidden="true"></span>
                         <h:outputText value="#{msgs.plugin_administration_uploadToActaPro}" />
                     </button>
