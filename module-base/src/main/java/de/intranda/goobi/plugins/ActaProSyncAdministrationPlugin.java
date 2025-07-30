@@ -272,6 +272,10 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                 updateLog("Found " + documents.size() + " ACTApro documents to import.");
 
                 updateLog("Document collection duration: " + ((System.currentTimeMillis() - start) / 1000) + " sec");
+            } catch (Exception e) {
+                log.error("Error during document search: {}", e.getMessage(), e);
+                updateLog("Error during document search: " + e.getMessage());
+                throw e;
             }
 
             long start = System.currentTimeMillis();
@@ -461,7 +465,12 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                 pusher.send("update");
             }
         };
-        new Thread(runnable).start();
+        Thread t = new Thread(runnable);
+        t.setUncaughtExceptionHandler((t1, e) -> {
+            log.error("Uncaught exception in \"downloadFromActaPro\"-thread: {}", e.getMessage(), e);
+            updateLog("Uncaught exception in \"downloadFromActaPro\"-thread: " + e.getMessage());
+        });
+        t.start();
     }
 
     private void parseDocumentMetadata(Document doc, IEadEntry entry) {
