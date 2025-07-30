@@ -131,6 +131,8 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
 
     private DateTimeFormatter requestDateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
+    private DateTimeFormatter logDateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
     private long lastPush = System.currentTimeMillis();
 
     private PushContext pusher;
@@ -999,7 +1001,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                 isLast = srp.getLast();
                 currentPage++;
                 if (currentPage % 10 == 0 || isLast) {
-                    updateLog("Found " + documents.size() + " documents on " + currentPage + " page(s).");
+                    updateLog("Found " + documents.size() + " documents on " + currentPage + " page(s) of " + srp.getTotalPages() + " page(s) - [" + LocalDateTime.now().format(logDateFormatter) + "]");
                 }
             } else {
                 ErrorResponse error = response.readEntity(ErrorResponse.class);
