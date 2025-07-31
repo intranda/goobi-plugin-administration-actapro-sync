@@ -76,6 +76,8 @@ import ugh.exceptions.UGHException;
 @PluginImplementation
 @Log4j2
 public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, IPushPlugin {
+    private static final int MAX_DOCUMENT_IMPORT_RETRIES = 5;
+    private static final int MAX_DOCUMENT_IMPORT_RETRY_DELAY = 3000;
 
     private static final long serialVersionUID = 2632106883746583247L;
 
@@ -990,11 +992,32 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                 List<Map<String, String>> contentMap = srp.getContent();
                 for (Map<String, String> content : contentMap) {
                     if (content.get("path").startsWith(rootElementId)) {
+                        int retry = MAX_DOCUMENT_IMPORT_RETRIES;
+                        boolean success = false;
                         String id = content.get("id");
-                        Document doc = ActaProApi.getDocumentByKey(client, token, connectorUrl, id);
-                        doc.setPath(content.get("path"));
-                        // only add documents from the selected archive
-                        documents.add(doc);
+                        while (retry > 0) {
+                            Document doc = ActaProApi.getDocumentByKey(client, token, connectorUrl, id);
+                            // TODO: Improve error handling instead of null values!
+                            if (doc == null) {
+                                log.error("Unable to retrieve document with id '{}', retrying {} more times", id, retry);
+                                try {
+                                    Thread.sleep(MAX_DOCUMENT_IMPORT_RETRY_DELAY);
+                                } catch (InterruptedException e) {
+                                    log.error("Failed to wait for retry delay", e);
+                                    throw new RuntimeException(e);
+                                }
+                                retry--;
+                            } else {
+                                doc.setPath(content.get("path"));
+                                // only add documents from the selected archive
+                                documents.add(doc);
+                                success = true;
+                                break;
+                            }
+                        }
+                        if (!success) {
+                            log.error("Unable to retrieve document with id '{}'.", id);
+                        }
                     }
                 }
 
