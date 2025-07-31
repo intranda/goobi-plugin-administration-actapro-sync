@@ -6,13 +6,8 @@ import java.io.IOException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.Map.Entry;
-import java.util.Queue;
-import java.util.UUID;
 
 import org.apache.commons.collections4.queue.CircularFifoQueue;
 import org.apache.commons.configuration.ConfigurationException;
@@ -1017,6 +1012,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                         }
                         if (!success) {
                             log.error("Unable to retrieve document with id '{}'.", id);
+                            return Collections.emptyList();
                         }
                     }
                 }
