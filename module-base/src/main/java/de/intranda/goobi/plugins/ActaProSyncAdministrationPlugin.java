@@ -6,13 +6,8 @@ import java.io.IOException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.Map.Entry;
-import java.util.Queue;
-import java.util.UUID;
 
 import org.apache.commons.collections4.queue.CircularFifoQueue;
 import org.apache.commons.configuration.ConfigurationException;
@@ -76,6 +71,8 @@ import ugh.exceptions.UGHException;
 @PluginImplementation
 @Log4j2
 public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, IPushPlugin {
+    private static final int MAX_DOCUMENT_IMPORT_RETRIES = 5;
+    private static final int MAX_DOCUMENT_IMPORT_RETRY_DELAY = 3000;
 
     private static final long serialVersionUID = 2632106883746583247L;
 
@@ -130,6 +127,8 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
     private DateTimeFormatter documentDateFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss:SSS");
 
     private DateTimeFormatter requestDateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+
+    private DateTimeFormatter logDateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private long lastPush = System.currentTimeMillis();
 
@@ -272,6 +271,10 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                 updateLog("Found " + documents.size() + " ACTApro documents to import.");
 
                 updateLog("Document collection duration: " + ((System.currentTimeMillis() - start) / 1000) + " sec");
+            } catch (Exception e) {
+                log.error("Error during document search: {}", e.getMessage(), e);
+                updateLog("Error during document search: " + e.getMessage());
+                throw e;
             }
 
             long start = System.currentTimeMillis();
@@ -461,7 +464,12 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                 pusher.send("update");
             }
         };
-        new Thread(runnable).start();
+        Thread t = new Thread(runnable);
+        t.setUncaughtExceptionHandler((t1, e) -> {
+            log.error("Uncaught exception in \"downloadFromActaPro\"-thread: {}", e.getMessage(), e);
+            updateLog("Uncaught exception in \"downloadFromActaPro\"-thread: " + e.getMessage());
+        });
+        t.start();
     }
 
     private void parseDocumentMetadata(Document doc, IEadEntry entry) {
@@ -979,18 +987,40 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                 List<Map<String, String>> contentMap = srp.getContent();
                 for (Map<String, String> content : contentMap) {
                     if (content.get("path").startsWith(rootElementId)) {
+                        int retry = MAX_DOCUMENT_IMPORT_RETRIES;
+                        boolean success = false;
                         String id = content.get("id");
-                        Document doc = ActaProApi.getDocumentByKey(client, token, connectorUrl, id);
-                        doc.setPath(content.get("path"));
-                        // only add documents from the selected archive
-                        documents.add(doc);
+                        while (retry > 0) {
+                            Document doc = ActaProApi.getDocumentByKey(client, token, connectorUrl, id);
+                            // TODO: Improve error handling instead of null values!
+                            if (doc == null) {
+                                log.error("Unable to retrieve document with id '{}', retrying {} more times", id, retry);
+                                try {
+                                    Thread.sleep(MAX_DOCUMENT_IMPORT_RETRY_DELAY);
+                                } catch (InterruptedException e) {
+                                    log.error("Failed to wait for retry delay", e);
+                                    throw new RuntimeException(e);
+                                }
+                                retry--;
+                            } else {
+                                doc.setPath(content.get("path"));
+                                // only add documents from the selected archive
+                                documents.add(doc);
+                                success = true;
+                                break;
+                            }
+                        }
+                        if (!success) {
+                            log.error("Unable to retrieve document with id '{}'.", id);
+                            return Collections.emptyList();
+                        }
                     }
                 }
 
                 isLast = srp.getLast();
                 currentPage++;
                 if (currentPage % 10 == 0 || isLast) {
-                    updateLog("Found " + documents.size() + " documents on " + currentPage + " page(s).");
+                    updateLog("Found " + documents.size() + " documents on " + currentPage + " page(s) of " + srp.getTotalPages() + " page(s) - [" + LocalDateTime.now().format(logDateFormatter) + "]");
                 }
             } else {
                 ErrorResponse error = response.readEntity(ErrorResponse.class);
