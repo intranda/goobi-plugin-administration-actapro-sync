@@ -3,6 +3,12 @@ title: ACTApro synchronisation
 identifier: intranda_administration_actapro_sync
 description: Administration plugin for synchronising archive management with ACTApro
 published: true
+keywords:
+    - Plugin
+    - Administration
+    - ACTApro
+    - Archive Management
+    - EAD
 ---
 
 ## Introduction
