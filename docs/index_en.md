@@ -5,7 +5,7 @@ description: Administration plugin for synchronising archive management with ACT
 published: true
 keywords:
     - Plugin
-    - Administration
+    - Administration Plugin
     - ACTApro
     - Archive Management
     - EAD

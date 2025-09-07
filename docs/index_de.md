@@ -5,7 +5,7 @@ description: Administration Plugin zur Synchronisation des Archiv-Managements mi
 published: true
 keywords:
     - Plugin
-    - Administration
+    - Administration Plugin
     - ACTApro
     - Archivmanagement
     - EAD
