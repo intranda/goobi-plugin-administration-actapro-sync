@@ -4,6 +4,7 @@ identifier: intranda_administration_actapro_sync
 description: Administration plugin for synchronising archive management with ACTApro
 published: true
 keywords:
+    - Goobi workflow
     - Plugin
     - Administration Plugin
     - ACTApro
