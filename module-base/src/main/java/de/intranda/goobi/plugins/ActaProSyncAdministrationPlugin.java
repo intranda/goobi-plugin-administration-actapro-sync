@@ -6,8 +6,14 @@ import java.io.IOException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Queue;
+import java.util.UUID;
 
 import org.apache.commons.collections4.queue.CircularFifoQueue;
 import org.apache.commons.configuration.ConfigurationException;
@@ -960,11 +966,12 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                 searchRequest.addFiltersItem(filter);
             }
         }
+        // doctype vz and parentid = xy
         searchRequest.addDocumentTypesItem("Arch");
+        searchRequest.addDocumentTypesItem("Tekt");
         searchRequest.addDocumentTypesItem("Best");
         searchRequest.addDocumentTypesItem("Klas");
         searchRequest.addDocumentTypesItem("Ser");
-        searchRequest.addDocumentTypesItem("Tekt");
         searchRequest.addDocumentTypesItem("Vz");
 
         updateLog("Search for documents");
@@ -995,6 +1002,13 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                             // TODO: Improve error handling instead of null values!
                             if (doc == null) {
                                 log.error("Unable to retrieve document with id '{}', retrying {} more times", id, retry);
+                                updateLog("Unable to retrieve document with id '" + id + "', retrying " + retry + " more times");
+                                if (id.startsWith("Vz")) {
+                                    // if we found the deepest hierarchy type, we set success to true, so that the entire import does not fail.
+                                    // The individual document cannot be imported, but the import itself can continue.
+                                    // But if an element from a higher hierarchy fails, we abort because we cannot build a tree without this node.
+                                    success = true;
+                                }
                                 try {
                                     Thread.sleep(MAX_DOCUMENT_IMPORT_RETRY_DELAY);
                                 } catch (InterruptedException e) {
@@ -1020,7 +1034,8 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                 isLast = srp.getLast();
                 currentPage++;
                 if (currentPage % 10 == 0 || isLast) {
-                    updateLog("Found " + documents.size() + " documents on " + currentPage + " page(s) of " + srp.getTotalPages() + " page(s) - [" + LocalDateTime.now().format(logDateFormatter) + "]");
+                    updateLog("Found " + documents.size() + " documents on " + currentPage + " page(s) of " + srp.getTotalPages() + " page(s) - ["
+                            + LocalDateTime.now().format(logDateFormatter) + "]");
                 }
             } else {
                 ErrorResponse error = response.readEntity(ErrorResponse.class);
