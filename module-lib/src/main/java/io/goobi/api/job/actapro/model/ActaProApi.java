@@ -103,34 +103,8 @@ public class ActaProApi {
         Response response = builder.get();
         if (200 == response.getStatus()) {
 
-            Document doc = response.readEntity(Document.class);
-            log.trace("DocKey: {}", doc.getDocKey());
-            log.trace("type: {}", doc.getType());
-            log.trace("DocTitle: {}", doc.getDocTitle());
-            log.trace("CreatorID: {}", doc.getCreatorID());
-            log.trace("OwnerID: {}", doc.getOwnerId());
-            log.trace("CreationDate: {}", doc.getCreationDate());
-            log.trace("ChangeDate: {}", doc.getChangeDate());
-            log.trace("object: {}", doc.getObject());
-            DocumentBlock block = doc.getBlock();
-            log.trace("block type: {}", block.getType());
+            return response.readEntity(Document.class);
 
-            for (DocumentField field : block.getFields()) {
-
-                log.trace("*** {} ***", field.getType());
-                if (StringUtils.isNotBlank(field.getPlainValue())) {
-                    log.trace(field.getPlainValue());
-                }
-                if (StringUtils.isNotBlank(field.getValue())) {
-                    log.trace(field.getValue());
-                }
-                if (field.getFields() != null) {
-                    for (DocumentField subfield : field.getFields()) {
-                        log.trace("    {}: {}", subfield.getType(), subfield.getValue());
-                    }
-                }
-            }
-            return doc;
         } else {
             log.error("Status: {}, Error: {}", response.getStatus(), response.getStatusInfo().getReasonPhrase());
             return null;

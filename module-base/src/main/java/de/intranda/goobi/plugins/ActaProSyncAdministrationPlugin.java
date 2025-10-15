@@ -605,6 +605,10 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
 
                         // if yes -> find document
                         Document doc = ActaProApi.getDocumentByKey(client, token, connectorUrl, nodeId);
+                        if (doc == null) {
+                            updateLog("Skip node as the id cannot be found in ACTApro");
+                            continue;
+                        }
                         // check if parent is still the same
                         updateParentDocument(entry, doc);
 
@@ -688,45 +692,49 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
 
                         // insert as new doc
                         doc = ActaProApi.createDocument(client, token, connectorUrl, parentDocKey, doc);
-
-                        // get id from response document
-                        String newDocumentKey = doc.getDocKey();
-                        // save generated id
-                        for (IMetadataField emf : entry.getIdentityStatementAreaList()) {
-                            if (emf.getName().equals(identifierFieldName)) {
-                                emf.getValues().get(0).setValue(newDocumentKey);
-                                // if process exists, write newDocumentKey to metadata
-                                if (StringUtils.isNotBlank(entry.getGoobiProcessTitle())) {
-                                    Process goobiProcess = ProcessManager.getProcessByExactTitle(entry.getGoobiProcessTitle());
-                                    if (goobiProcess != null) {
-                                        try {
-                                            Fileformat ff = goobiProcess.readMetadataFile();
-                                            DocStruct logical = ff.getDigitalDocument().getLogicalDocStruct();
-                                            if (logical.getType().isAnchor()) {
-                                                logical = logical.getAllChildren().get(0);
-                                            }
-                                            // check if metadata already exists, update value
-                                            boolean metadataUpdated = false;
-                                            for (Metadata md : logical.getAllMetadata()) {
-                                                if (md.getType().getName().equals(emf.getMetadataName())) {
-                                                    md.setValue(newDocumentKey);
-                                                    metadataUpdated = true;
-                                                    break;
+                        // If doc is null, the upload  has failed, probably because the document is temporarily locked or there is a conflict.
+                        if (doc != null) {
+                            // get id from response document
+                            String newDocumentKey = doc.getDocKey();
+                            // save generated id
+                            for (IMetadataField emf : entry.getIdentityStatementAreaList()) {
+                                if (emf.getName().equals(identifierFieldName)) {
+                                    emf.getValues().get(0).setValue(newDocumentKey);
+                                    // if process exists, write newDocumentKey to metadata
+                                    if (StringUtils.isNotBlank(entry.getGoobiProcessTitle())) {
+                                        Process goobiProcess = ProcessManager.getProcessByExactTitle(entry.getGoobiProcessTitle());
+                                        if (goobiProcess != null) {
+                                            try {
+                                                Fileformat ff = goobiProcess.readMetadataFile();
+                                                DocStruct logical = ff.getDigitalDocument().getLogicalDocStruct();
+                                                if (logical.getType().isAnchor()) {
+                                                    logical = logical.getAllChildren().get(0);
                                                 }
+                                                // check if metadata already exists, update value
+                                                boolean metadataUpdated = false;
+                                                for (Metadata md : logical.getAllMetadata()) {
+                                                    if (md.getType().getName().equals(emf.getMetadataName())) {
+                                                        md.setValue(newDocumentKey);
+                                                        metadataUpdated = true;
+                                                        break;
+                                                    }
+                                                }
+
+                                                // or create a new field
+                                                if (!metadataUpdated) {
+                                                    Metadata md = new Metadata(
+                                                            goobiProcess.getRegelsatz()
+                                                                    .getPreferences()
+                                                                    .getMetadataTypeByName(emf.getMetadataName()));
+                                                    md.setValue(newDocumentKey);
+                                                    logical.addMetadata(md);
+                                                }
+                                                goobiProcess.writeMetadataFile(ff);
+                                            } catch (UGHException | IOException | SwapException e1) {
+                                                log.error(e1);
                                             }
 
-                                            // or create a new field
-                                            if (!metadataUpdated) {
-                                                Metadata md = new Metadata(
-                                                        goobiProcess.getRegelsatz().getPreferences().getMetadataTypeByName(emf.getMetadataName()));
-                                                md.setValue(newDocumentKey);
-                                                logical.addMetadata(md);
-                                            }
-                                            goobiProcess.writeMetadataFile(ff);
-                                        } catch (UGHException | IOException | SwapException e1) {
-                                            log.error(e1);
                                         }
-
                                     }
                                 }
                             }
