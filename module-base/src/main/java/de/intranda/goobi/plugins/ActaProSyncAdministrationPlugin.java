@@ -1080,7 +1080,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                 }
             }
         } else if (emf.getName().equals(matchedMapping.getEadField())) {
-            if (!emf.getValues().isEmpty()) {
+            if (emf.getValues() != null && !emf.getValues().isEmpty()) {
                 emf.getValues().get(0).setValue(value);
             } else {
                 emf.addValue();
