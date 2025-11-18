@@ -15,5 +15,10 @@
       <version>25.11-SNAPSHOT</version>
       <scope>compile</scope>
     </dependency>
+    <dependency>
+        <groupId>io.goobi.workflow.plugin</groupId>
+        <artifactId>plugin-administration-archive-management-lib</artifactId>
+        <version>25.11-SNAPSHOT</version>
+    </dependency>
   </dependencies>
 </project>
