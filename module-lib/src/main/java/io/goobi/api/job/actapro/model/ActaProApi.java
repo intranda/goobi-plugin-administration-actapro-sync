@@ -1,7 +1,11 @@
 package io.goobi.api.job.actapro.model;
 
+import java.io.IOException;
+import java.time.Duration;
+
 import org.apache.commons.lang3.StringUtils;
 
+import de.sub.goobi.helper.RetryUtils;
 import jakarta.ws.rs.client.Client;
 import jakarta.ws.rs.client.Entity;
 import jakarta.ws.rs.client.Invocation;
@@ -89,9 +93,10 @@ public class ActaProApi {
      * @param token
      * @param key
      * @return
+     * @throws IOException
      */
 
-    public static Document getDocumentByKey(Client client, AuthenticationToken token, String connectorUrl, String key) {
+    public static Document getDocumentByKey(Client client, AuthenticationToken token, String connectorUrl, String key) throws IOException {
         if (token == null) {
             return null;
         }
@@ -100,15 +105,16 @@ public class ActaProApi {
         builder.header("Accept", "application/json");
         builder.header("Authorization", "Bearer " + token.getAccessToken());
 
-        Response response = builder.get();
+        Response response = RetryUtils.retry(new IOException("failed after retries"), Duration.ofSeconds(5l), 4,
+                () -> builder.get());
+
         if (200 == response.getStatus()) {
-
             return response.readEntity(Document.class);
-
         } else {
             log.error("Status: {}, Error: {}", response.getStatus(), response.getStatusInfo().getReasonPhrase());
             return null;
         }
+
     }
 
     public static String getJsonDocumentAsString(Client client, AuthenticationToken token, String connectorUrl, String key) {

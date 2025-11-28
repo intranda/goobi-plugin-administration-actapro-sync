@@ -20,4 +20,9 @@ public class AuthenticationToken {
     private String tokenType;
     @JsonProperty("expires_in")
     private int expiresIn;
+    @JsonProperty("error_description")
+    private String errorDescription;
+    @JsonProperty("error")
+    private String error;
+
 }

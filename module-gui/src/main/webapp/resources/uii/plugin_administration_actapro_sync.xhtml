@@ -12,13 +12,13 @@
     xmlns:o="http://omnifaces.org/ui"
     xmlns:section="http://goobi.io/section">
 
-	<h:panelGroup
-	   rendered="#{!LoginForm.hasRole('Plugin_administration_actapro_sync')}"
-	   styleClass="color-box bg-hot text-white d-flex flex-row p-3">
-	   <h:outputText
-	       styleClass="fw-bold"
-	       value="#{msgs.plugin_administration_missingPermission} Plugin_administration_actapro_sync" />
-	</h:panelGroup>
+    <h:panelGroup
+        rendered="#{!LoginForm.hasRole('Plugin_administration_actapro_sync')}"
+        styleClass="color-box bg-hot text-white d-flex flex-row p-3">
+        <h:outputText
+            styleClass="fw-bold"
+            value="#{msgs.plugin_administration_missingPermission} Plugin_administration_actapro_sync" />
+    </h:panelGroup>
 
     <h:panelGroup rendered="#{LoginForm.hasRole('Plugin_administration_actapro_sync')}">
 
@@ -131,7 +131,7 @@
                         value="#{AdministrationForm.administrationPlugin.logQueue}">
                         <li class="feed-item">
 
-                            <span class="feed-item-content"> #{log} </span>
+                            <span class="feed-item-content white-space-pre">#{log}</span>
                         </li>
                     </ui:repeat>
                 </ol>
