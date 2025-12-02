@@ -855,12 +855,12 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                             log.error(e);
                         }
                         if (doc == null) {
-                            if (id.startsWith("Vz")) {
-                                // if we found the deepest hierarchy type, we set success to true, so that the entire import does not fail.
-                                // The individual document cannot be imported, but the import itself can continue.
-                                // But if an element from a higher hierarchy fails, we abort because we cannot build a tree without this node.
-                                success = true;
-                            }
+                            //                            if (id.startsWith("Vz")) {
+                            // if we found the deepest hierarchy type, we set success to true, so that the entire import does not fail.
+                            // The individual document cannot be imported, but the import itself can continue.
+                            // But if an element from a higher hierarchy fails, we abort because we cannot build a tree without this node.
+                            success = true;
+                            //                            }
                         } else {
                             doc.setPath(content.get("path"));
                             // only add documents from the selected archive
