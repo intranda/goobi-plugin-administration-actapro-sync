@@ -57,13 +57,14 @@ public class ActaProApi {
         Invocation.Builder builder = target.request();
         builder.header("Accept", "application/json");
         builder.header("Authorization", "Bearer " + token.getAccessToken());
-        Response response = builder.put(Entity.entity(doc, MediaType.APPLICATION_JSON));
-        if (200 == response.getStatus()) {
-            return response.readEntity(Document.class);
-        } else {
-            ErrorResponse error = response.readEntity(ErrorResponse.class);
-            log.error("Status: {}, Error: {}", error.getStatus(), error.getMessage());
-            return null;
+        try (Response response = builder.put(Entity.entity(doc, MediaType.APPLICATION_JSON))) {
+            if (200 == response.getStatus()) {
+                return response.readEntity(Document.class);
+            } else {
+                ErrorResponse error = response.readEntity(ErrorResponse.class);
+                log.error("Status: {}, Error: {}", error.getStatus(), error.getMessage());
+                return null;
+            }
         }
     }
 
@@ -75,13 +76,14 @@ public class ActaProApi {
         Invocation.Builder builder = target.request();
         builder.header("Accept", "application/json");
         builder.header("Authorization", "Bearer " + token.getAccessToken());
-        Response response = builder.post(Entity.entity(doc, MediaType.APPLICATION_JSON));
-        if (200 == response.getStatus()) {
-            return response.readEntity(Document.class);
-        } else {
-            ErrorResponse error = response.readEntity(ErrorResponse.class);
-            log.error("Status: {}, Error: {}", error.getStatus(), error.getMessage());
-            return null;
+        try (Response response = builder.post(Entity.entity(doc, MediaType.APPLICATION_JSON))) {
+            if (200 == response.getStatus()) {
+                return response.readEntity(Document.class);
+            } else {
+                ErrorResponse error = response.readEntity(ErrorResponse.class);
+                log.error("Status: {}, Error: {}", error.getStatus(), error.getMessage());
+                return null;
+            }
         }
     }
 
@@ -105,14 +107,14 @@ public class ActaProApi {
         builder.header("Accept", "application/json");
         builder.header("Authorization", "Bearer " + token.getAccessToken());
 
-        Response response = RetryUtils.retry(new IOException("failed after retries"), Duration.ofSeconds(5l), 4,
-                () -> builder.get());
-
-        if (200 == response.getStatus()) {
-            return response.readEntity(Document.class);
-        } else {
-            log.error("Status: {}, Error: {}", response.getStatus(), response.getStatusInfo().getReasonPhrase());
-            return null;
+        try (Response response = RetryUtils.retry(new IOException("failed after retries"), Duration.ofSeconds(5l), 4,
+                () -> builder.get())) {
+            if (200 == response.getStatus()) {
+                return response.readEntity(Document.class);
+            } else {
+                log.error("Status: {}, Error: {}", response.getStatus(), response.getStatusInfo().getReasonPhrase());
+                return null;
+            }
         }
 
     }
@@ -126,13 +128,14 @@ public class ActaProApi {
         builder.header("Accept", "application/json");
         builder.header("Authorization", "Bearer " + token.getAccessToken());
 
-        Response response = builder.get();
-        if (200 == response.getStatus()) {
+        try (Response response = builder.get()) {
+            if (200 == response.getStatus()) {
 
-            return response.readEntity(String.class);
-        } else {
-            log.error("Status: {}, Error: {}", response.getStatus(), response.getStatusInfo().getReasonPhrase());
-            return null;
+                return response.readEntity(String.class);
+            } else {
+                log.error("Status: {}, Error: {}", response.getStatus(), response.getStatusInfo().getReasonPhrase());
+                return null;
+            }
         }
     }
 
