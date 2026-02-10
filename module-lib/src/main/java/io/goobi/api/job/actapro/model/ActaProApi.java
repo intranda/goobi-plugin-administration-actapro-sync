@@ -2,10 +2,10 @@ package io.goobi.api.job.actapro.model;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.function.Supplier;
 
 import org.apache.commons.lang3.StringUtils;
 
-import de.sub.goobi.helper.RetryUtils;
 import jakarta.ws.rs.client.Client;
 import jakarta.ws.rs.client.Entity;
 import jakarta.ws.rs.client.Invocation;
@@ -39,8 +39,9 @@ public class ActaProApi {
         Invocation.Builder builder = target.request();
         builder.header("Accept", "application/json");
         builder.header("Authorization", authServiceHeader);
-        Response response = builder.post(Entity.form(form));
-        return response.readEntity(AuthenticationToken.class);
+        try (Response response = builder.post(Entity.form(form))) {
+            return response.readEntity(AuthenticationToken.class);
+        }
     }
 
     public static Document updateDocument(Client client, AuthenticationToken token, String connectorUrl, Document doc) {
@@ -102,13 +103,15 @@ public class ActaProApi {
         if (token == null) {
             return null;
         }
-        WebTarget target = client.target(connectorUrl).path("document").path(key);
-        Invocation.Builder builder = target.request();
-        builder.header("Accept", "application/json");
-        builder.header("Authorization", "Bearer " + token.getAccessToken());
 
-        try (Response response = RetryUtils.retry(new IOException("failed after retries"), Duration.ofSeconds(5l), 4,
-                () -> builder.get())) {
+        try (Response response = retry(new IOException("failed after retries"), Duration.ofSeconds(5l), 4,
+                () -> client.target(connectorUrl)
+                        .path("document")
+                        .path(key)
+                        .request()
+                        .header("Accept", "application/json")
+                        .header("Authorization", "Bearer " + token.getAccessToken())
+                        .get())) {
             if (200 == response.getStatus()) {
                 return response.readEntity(Document.class);
             } else {
@@ -212,5 +215,29 @@ public class ActaProApi {
             // metadata does not exist on both sides, nothing to do
         }
         return metadataChanged;
+    }
+
+    public static Response retry(IOException finalException, Duration wait, int retries, Supplier<Response> supplier) throws IOException {
+        Response response = null;
+        for (int i = 0; i < retries; i++) {
+            try {
+                response = supplier.get();
+                if (response.getStatus() >= 200 && response.getStatus() < 300) {
+                    return response;
+                }
+                response.close();
+            } catch (Exception e) {
+                if (response != null) {
+                    response.close();
+                }
+                try {
+                    Thread.sleep(wait.toMillis());
+                } catch (InterruptedException e1) {
+                    Thread.currentThread().interrupt();
+                    throw finalException;
+                }
+            }
+        }
+        throw finalException;
     }
 }
