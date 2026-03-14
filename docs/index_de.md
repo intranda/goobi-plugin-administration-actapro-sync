@@ -48,8 +48,8 @@ Damit die Synchronisation funktioniert, müssen folgende Punkte erfüllt sein:
 - Der root-Knoten des Bestands muss im Archiv-Management existieren
 - im root-Knoten muss die ID des ACTApro-root-Dokuments eingetragen werden 
 
-Wenn `Mit Daten aus ACTApro aktualisieren` ausgewählt wurde, wird zuerst in ACTApro nach allen Datensätzen gesucht, die zu diesem Bestand gehören (gegebenenfalls eingeschränkt auf ein Änderungsdatum innerhalb des gesetzten Zeitraums). Für jeden gefundenen Datensatz wird das vollständige Metadaten-Dokument abgefragt und dann anhand der ACTApro-ID geprüft, ob im Archiv-Mangement bereits ein Knoten existiert oder ob es sich um einen neuen Knoten handelt. Wenn der Knoten bereits existiert, wird als nächstes geprüft, ob der Knoten immer noch das gleiche Elternelement hat oder inzwischen an einen anderen Ort umgehängt wurde. Anschließend werden die konfigurierten Felder gelesen und deren Inhalte in die Knoten überführt.
-Wenn es sich um einen neuen Knoten handelt, wird die in `path` angegebene Hierarchie geprüft und nach den Elternknoten gesucht. Gegebenfalls müssen diese ebenfalls neu erstellt werden. Wurde der Elternknoten gefunden (oder neu erstellt), wird an der agegebenen Reihenfolge (`$.Ref_Gp.Ref_DocOrder`) ein neuer Knoten erstellt, die ID importiert und anschließend die Metadaten importiert.
+Wenn `Mit Daten aus ACTApro aktualisieren` ausgewählt wurde, wird zuerst in ACTApro nach allen Datensätzen gesucht, die zu diesem Bestand gehören (gegebenenfalls eingeschränkt auf ein Änderungsdatum innerhalb des gesetzten Zeitraums). Für jeden gefundenen Datensatz wird das vollständige Metadaten-Dokument abgefragt und dann anhand der ACTApro-ID geprüft, ob im Archiv-Management bereits ein Knoten existiert oder ob es sich um einen neuen Knoten handelt. Wenn der Knoten bereits existiert, wird als nächstes geprüft, ob der Knoten immer noch das gleiche Elternelement hat oder inzwischen an einen anderen Ort umgehängt wurde. Anschließend werden die konfigurierten Felder gelesen und deren Inhalte in die Knoten überführt.
+Wenn es sich um einen neuen Knoten handelt, wird die in `path` angegebene Hierarchie geprüft und nach den Elternknoten gesucht. Gegebenenfalls müssen diese ebenfalls neu erstellt werden. Wurde der Elternknoten gefunden (oder neu erstellt), wird an der angegebenen Reihenfolge (`$.Ref_Gp.Ref_DocOrder`) ein neuer Knoten erstellt, die ID importiert und anschließend die Metadaten importiert.
 
 Bei `ACTApro aktualisieren` werden Daten aus dem Archiv-Management nach ACTApro geliefert. Hierzu wird bei jedem Knoten aus dem ausgewählten Bestand geprüft, ob er bereits eine ACTApro-ID enthält. Wenn dies der Fall ist, wird das zugehörige ACTApro json Document abgefragt und mit den konfigurierten Feldern aus dem Knoten überschrieben. Falls sich die ID des Elternknoten geändert hat, werden die neuen Informationen in `$.Ref_DocKey`, `$.Ref_DocOrder` und `$.Ref_Doctype` geschrieben. Das Dokument wird anschließend in ACTApro aktualisiert.
 Falls noch keine ACTApro-ID existiert, handelt es sich um einen neuen Knoten, der in ACTApro bisher unbekannt ist. Dann wird ein neues json-Document erstellt, die Metadaten und das Elternelement angegeben und in ACTApro neu erstellt. Die dabei generierte ID wird anschließend im Knoten gespeichert, so dass beim nächsten Durchlauf eine Aktualisierung möglich ist. 
@@ -65,8 +65,8 @@ Die folgende Tabelle enthält eine Zusammenstellung der Parameter und ihrer Besc
 
 Parameter               | Erläuterung
 ------------------------|------------------------------------
-`authentication`        | Hier werden die Angaben zur Authentifierung zusammengefasst
-`authServiceUrl`        | Enthält die URL zum Authentifierungsservice von ACTApro
+`authentication`        | Hier werden die Angaben zur Authentifizierung zusammengefasst
+`authServiceUrl`        | Enthält die URL zum Authentifizierungsservice von ACTApro
 `authServiceHeader`     | Enthält den Authorization header Parameter
 `authServiceUsername`   | Nutzername
 `authServicePassword`   | Passwort
