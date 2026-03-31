@@ -104,7 +104,7 @@ public class ActaProApi {
             return null;
         }
 
-        try (Response response = retry(new IOException("failed after retries"), Duration.ofSeconds(5l), 4,
+        try (Response response = retry(new IOException("failed after 5 retries"), Duration.ofSeconds(5l), 5,
                 () -> client.target(connectorUrl)
                         .path("document")
                         .path(key)

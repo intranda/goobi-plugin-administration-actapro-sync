@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -878,7 +879,8 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
             builder.header("Accept", "application/json");
             builder.header("Authorization", "Bearer " + token.getAccessToken());
 
-            try (Response response = builder.post(Entity.entity(searchRequest, MediaType.APPLICATION_JSON))) {
+            try (Response response = ActaProApi.retry(new IOException("failed after 5 retries"), Duration.ofSeconds(5l), 5,
+                    () -> builder.post(Entity.entity(searchRequest, MediaType.APPLICATION_JSON)))) {
                 Queue<String> queue = new LinkedList<>();
                 if (200 == response.getStatus()) {
 
@@ -893,7 +895,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                             try {
                                 doc = ActaProApi.getDocumentByKey(client, token, connectorUrl, id);
                             } catch (IOException e) {
-                                log.error("Unable to retrieve document with id '" + id + "', retrying {} more times", e);
+                                log.error("Unable to retrieve document with id '" + id + "'", e);
                                 log.error(e);
                             }
                             if (doc == null) {
@@ -923,8 +925,16 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                     currentPage++;
                 } else {
                     ErrorResponse error = response.readEntity(ErrorResponse.class);
-                    log.error("Search error, status: {}, text: {} ", error.getStatus(), error.getMessage());
-                    updateLog("Search error, status: " + error.getStatus() + ", text: " + error.getMessage());
+                    if (error != null) {
+                        log.error("Search error for child document search , status: {}, text: {}, parentid: {},  paginator {}", error.getStatus(),
+                                error.getMessage(), parentId, currentPage);
+                        updateLog("Search error, status: " + error.getStatus() + ", text: " + error.getMessage());
+                    } else {
+                        log.error(
+                                "Search error for child document search, HTTP status: {}, response body could not be parsed, , parentid: {},  paginator {}",
+                                response.getStatus(), parentId, currentPage);
+                        updateLog("Search error, HTTP status: " + response.getStatus());
+                    }
                     isLast = true;
                 }
                 while (!queue.isEmpty()) {
