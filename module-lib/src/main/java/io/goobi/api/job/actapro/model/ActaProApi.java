@@ -217,9 +217,10 @@ public class ActaProApi {
         return metadataChanged;
     }
 
-    public static Response retry(IOException finalException, Duration wait, int retries, Supplier<Response> supplier) throws IOException {
+    public static Response retry(IOException finalException, Duration wait, int maxRetries, Supplier<Response> supplier) throws IOException {
         Response response = null;
-        for (int i = 0; i < retries; i++) {
+        int counter = 0;
+        while (counter < maxRetries) {
             try {
                 response = supplier.get();
                 if (response.getStatus() >= 200 && response.getStatus() < 300) {
@@ -230,11 +231,12 @@ public class ActaProApi {
                 if (response != null) {
                     response.close();
                 }
+                counter++;
+                log.error(e);
                 try {
-                    Thread.sleep(wait.toMillis());
+                    Thread.sleep(wait.toMillis() * counter);
                 } catch (InterruptedException e1) {
                     Thread.currentThread().interrupt();
-                    throw finalException;
                 }
             }
         }

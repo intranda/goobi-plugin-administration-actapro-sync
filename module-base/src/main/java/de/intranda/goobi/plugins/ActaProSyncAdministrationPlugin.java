@@ -888,36 +888,34 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                     List<Map<String, String>> contentMap = srp.getContent();
                     for (Map<String, String> content : contentMap) {
                         if (content.get("path").contains(parentId)) {
-                            boolean success = false;
                             String id = content.get("id");
-
-                            Document doc = null;
-                            try {
-                                doc = ActaProApi.getDocumentByKey(client, token, connectorUrl, id);
-                            } catch (IOException e) {
-                                log.error("Unable to retrieve document with id '" + id + "'", e);
-                                log.error(e);
-                            }
-                            if (doc == null) {
-                                //                            if (id.startsWith("Vz")) {
-                                // if we found the deepest hierarchy type, we set success to true, so that the entire import does not fail.
-                                // The individual document cannot be imported, but the import itself can continue.
-                                // But if an element from a higher hierarchy fails, we abort because we cannot build a tree without this node.
-                                success = true;
-                                //                            }
+                            Integer entryId = ArchiveManagementManager.findNodeById(identifierFieldName, id);
+                            if (entryId == null) {
+                                Document doc = null;
+                                try {
+                                    doc = ActaProApi.getDocumentByKey(client, token, connectorUrl, id);
+                                } catch (Exception e) {
+                                    log.error("Unable to retrieve document with id '" + id + "'", e);
+                                    log.error(e);
+                                }
+                                if (doc == null) {
+                                    //                            if (id.startsWith("Vz")) {
+                                    // if we found the deepest hierarchy type, we set success to true, so that the entire import does not fail.
+                                    // The individual document cannot be imported, but the import itself can continue.
+                                    // But if an element from a higher hierarchy fails, we abort because we cannot build a tree without this node.
+                                    //                            }
+                                } else {
+                                    doc.setPath(content.get("path"));
+                                    // only add documents from the selected archive
+                                    importDocument(client, doc, recordGroup, rootElementID, token);
+                                    String newId = doc.getDocKey();
+                                    queue.add(newId);
+                                }
                             } else {
-                                doc.setPath(content.get("path"));
-                                // only add documents from the selected archive
-                                success = true;
-                                importDocument(client, doc, recordGroup, rootElementID, token);
-                                String newId = doc.getDocKey();
-                                queue.add(newId);
+                                updateLog("Skip existing ID '" + id + "'");
+                                log.debug("Skip existing ID '" + id + "'");
+                                queue.add(id);
                             }
-                            if (!success) {
-                                log.error("Unable to retrieve document with id '{}'.", id);
-                                throw new IOException("Unable to retrieve document with id " + id);
-                            }
-
                         }
                     }
 
@@ -943,6 +941,8 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                         answer.add(newId);
                     }
                 }
+            } catch (IOException e) {
+                updateLog("Cannot get child elements for " + parentId);
             }
         }
         return answer;
@@ -1070,7 +1070,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                             Document currentDoc = null;
                             try {
                                 currentDoc = ActaProApi.getDocumentByKey(client, token, connectorUrl, path);
-                            } catch (IOException e1) {
+                            } catch (Exception e1) {
                                 log.error(e1);
                                 updateLog("API download failed for document with id " + path);
                                 return null;
