@@ -226,18 +226,19 @@ public class ActaProApi {
                 if (response.getStatus() >= 200 && response.getStatus() < 300) {
                     return response;
                 }
+                log.error("HTTP {} received, retry {}/{}", response.getStatus(), counter + 1, maxRetries);
                 response.close();
             } catch (Exception e) {
                 if (response != null) {
                     response.close();
                 }
-                counter++;
                 log.error(e);
-                try {
-                    Thread.sleep(wait.toMillis() * counter);
-                } catch (InterruptedException e1) {
-                    Thread.currentThread().interrupt();
-                }
+            }
+            counter++;
+            try {
+                Thread.sleep(wait.toMillis() * counter);
+            } catch (InterruptedException e1) {
+                Thread.currentThread().interrupt();
             }
         }
         throw finalException;
