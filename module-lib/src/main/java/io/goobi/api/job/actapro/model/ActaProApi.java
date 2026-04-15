@@ -223,11 +223,17 @@ public class ActaProApi {
         while (counter < maxRetries) {
             try {
                 response = supplier.get();
+                if (response.getStatus() == 401) {
+                    response.close();
+                    throw new UnauthorizedException("HTTP 401 Unauthorized — token has expired, re-authentication required");
+                }
                 if (response.getStatus() >= 200 && response.getStatus() < 300) {
                     return response;
                 }
                 log.error("HTTP {} received, retry {}/{}", response.getStatus(), counter + 1, maxRetries);
                 response.close();
+            } catch (UnauthorizedException e) {
+                throw e;
             } catch (Exception e) {
                 if (response != null) {
                     response.close();

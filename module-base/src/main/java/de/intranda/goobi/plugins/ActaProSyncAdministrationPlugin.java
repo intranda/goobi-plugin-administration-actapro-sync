@@ -5,6 +5,7 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -63,6 +64,7 @@ import io.goobi.api.job.actapro.model.ErrorResponse;
 import io.goobi.api.job.actapro.model.ExtendedEadEntry;
 import io.goobi.api.job.actapro.model.MetadataMapping;
 import io.goobi.api.job.actapro.model.SearchResultPage;
+import io.goobi.api.job.actapro.model.UnauthorizedException;
 import io.goobi.api.job.actapro.model.SimpleEadEntry;
 import jakarta.annotation.PreDestroy;
 import jakarta.ws.rs.client.Client;
@@ -802,20 +804,33 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
         Queue<String> toProcess = new LinkedList<>();
         toProcess.add(parentId);
 
-        int counter = 0;
+        Instant tokenObtainedAt = Instant.now();
 
         while (!toProcess.isEmpty()) {
-            counter++;
-            // renew token every 200 records
-            if (counter % 200 == 0) {
+            // Proactively renew token 60 seconds before it expires
+            if (token != null && token.getExpiresIn() > 0
+                    && Instant.now().isAfter(tokenObtainedAt.plusSeconds(token.getExpiresIn() - 60))) {
+                log.info("Token about to expire, renewing proactively");
                 token = ActaProApi.authenticate(client, authServiceHeader, authServiceUrl, authServiceUsername,
                         authServicePassword);
+                tokenObtainedAt = Instant.now();
             }
+
             String current = toProcess.poll();
-            List<String> children =
-                    searchChildren(client, token, current, recordGroup,
-                            rootElementID);
-            toProcess.addAll(children);
+            try {
+                List<String> children = searchChildren(client, token, current, recordGroup, rootElementID);
+                toProcess.addAll(children);
+            } catch (UnauthorizedException e) {
+                log.warn("Token expired while processing '{}', re-authenticating and retrying", current);
+                token = ActaProApi.authenticate(client, authServiceHeader, authServiceUrl, authServiceUsername,
+                        authServicePassword);
+                tokenObtainedAt = Instant.now();
+                if (token != null) {
+                    toProcess.add(current);
+                } else {
+                    log.error("Re-authentication failed, skipping document '{}'", current);
+                }
+            }
         }
     }
 
@@ -863,12 +878,12 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
         searchRequest.addFiltersItem(filter);
 
         updateLog("Search for documents with parent id " + parentId);
-        searchRequest.addDocumentTypesItem("Arch");
-        searchRequest.addDocumentTypesItem("Tekt");
-        searchRequest.addDocumentTypesItem("Best");
-        searchRequest.addDocumentTypesItem("Klas");
-        searchRequest.addDocumentTypesItem("Ser");
-        searchRequest.addDocumentTypesItem("Vz");
+        //        searchRequest.addDocumentTypesItem("Arch");
+        //        searchRequest.addDocumentTypesItem("Tekt");
+        //        searchRequest.addDocumentTypesItem("Best");
+        //        searchRequest.addDocumentTypesItem("Klas");
+        //        searchRequest.addDocumentTypesItem("Ser");
+        //        searchRequest.addDocumentTypesItem("Vz");
 
         // post request
         boolean isLast = false;
@@ -894,6 +909,8 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                                 Document doc = null;
                                 try {
                                     doc = ActaProApi.getDocumentByKey(client, token, connectorUrl, id);
+                                } catch (UnauthorizedException e) {
+                                    throw e;
                                 } catch (Exception e) {
                                     log.error("Unable to retrieve document with id '" + id + "'", e);
                                     log.error(e);
@@ -941,6 +958,8 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                         answer.add(newId);
                     }
                 }
+            } catch (UnauthorizedException e) {
+                throw e;
             } catch (IOException e) {
                 updateLog("Cannot get child elements for " + parentId);
             }
@@ -986,7 +1005,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
         }
     }
 
-    private String importDocument(Client client, Document doc, RecordGroup recordGroup, String rootElementID, AuthenticationToken token) {
+    private String importDocument(Client client, Document doc, RecordGroup recordGroup, String rootElementID, AuthenticationToken token) throws IOException {
         String documentId = doc.getDocKey();
         String parentNodeId = null;
         String docOrder = null;
@@ -1070,6 +1089,8 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                             Document currentDoc = null;
                             try {
                                 currentDoc = ActaProApi.getDocumentByKey(client, token, connectorUrl, path);
+                            } catch (UnauthorizedException e1) {
+                                throw e1;
                             } catch (Exception e1) {
                                 log.error(e1);
                                 updateLog("API download failed for document with id " + path);
