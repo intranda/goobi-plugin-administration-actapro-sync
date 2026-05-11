@@ -89,6 +89,22 @@
 
 
                 <div class="form-actions">
+                
+                
+                
+                    <button
+                        jsf:rendered="#{AdministrationForm.administrationPlugin.enableXmlImport}"
+                        jsf:action="#{AdministrationForm.administrationPlugin.xmlImport}"
+                        aria-label="#{msgs.plugin_administration_xmlImport}"
+                        title="#{msgs.plugin_administration_xmlImport}"
+                        class="btn btn-blank">
+                        <span
+                            class="fa fa-download me-2"
+                            aria-hidden="true"></span>
+                        <h:outputText value="#{msgs.plugin_administration_xmlImport}" />
+                    </button>
+                
+                
                     <button
                         jsf:action="#{AdministrationForm.administrationPlugin.downloadFromActaPro}"
                         aria-label="#{msgs.plugin_administration_downloadFromActaPro}"

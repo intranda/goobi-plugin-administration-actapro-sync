@@ -1,6 +1,9 @@
 package de.intranda.goobi.plugins;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -10,16 +13,22 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Queue;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.apache.commons.collections4.queue.CircularFifoQueue;
 import org.apache.commons.configuration.ConfigurationException;
@@ -40,12 +49,15 @@ import org.goobi.model.ExtendendValue;
 import org.goobi.production.enums.PluginType;
 import org.goobi.production.plugin.interfaces.IAdministrationPlugin;
 import org.goobi.production.plugin.interfaces.IPushPlugin;
+import org.jdom2.Element;
+import org.jdom2.JDOMException;
+import org.jdom2.Namespace;
+import org.jdom2.input.SAXBuilder;
 import org.omnifaces.cdi.PushContext;
 
 import de.intranda.goobi.plugins.model.ArchiveManagementConfiguration;
 import de.intranda.goobi.plugins.model.RecordGroup;
 import de.intranda.goobi.plugins.persistence.ArchiveManagementManager;
-//import de.intranda.goobi.plugins.persistence.ArchiveManagementManager;
 import de.intranda.goobi.plugins.persistence.NodeInitializer;
 import de.sub.goobi.config.ConfigurationHelper;
 import de.sub.goobi.helper.Helper;
@@ -64,8 +76,8 @@ import io.goobi.api.job.actapro.model.ErrorResponse;
 import io.goobi.api.job.actapro.model.ExtendedEadEntry;
 import io.goobi.api.job.actapro.model.MetadataMapping;
 import io.goobi.api.job.actapro.model.SearchResultPage;
-import io.goobi.api.job.actapro.model.UnauthorizedException;
 import io.goobi.api.job.actapro.model.SimpleEadEntry;
+import io.goobi.api.job.actapro.model.UnauthorizedException;
 import jakarta.annotation.PreDestroy;
 import jakarta.ws.rs.client.Client;
 import jakarta.ws.rs.client.ClientBuilder;
@@ -88,6 +100,8 @@ import ugh.exceptions.UGHException;
 public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, IPushPlugin {
 
     private static final long serialVersionUID = 2632106883746583247L;
+
+    private static final Namespace H1_NS = Namespace.getNamespace("h1", "http://www.startext.de/HiDA/DefService/XMLSchema");
 
     @Getter
     private String title = "intranda_administration_actapro_sync";
@@ -146,10 +160,17 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
     private PushContext pusher;
     @Getter
     private Queue<String> logQueue = new CircularFifoQueue<>(48);
-    @Getter
 
+    @Getter
     private final AtomicBoolean run = new AtomicBoolean(false);
+
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
+
+    @Getter
+    private boolean enableXmlImport = false;
+    private String xmlImportFolder;
+
+    private String xmlTectonicsFile;
 
     public ActaProSyncAdministrationPlugin() {
         log.trace("initialize plugin");
@@ -230,8 +251,250 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                 nodes.put(actaProType, defaultType);
             }
         }
+
+        enableXmlImport = actaProConfig.getBoolean("/xml/@enabled");
+        xmlImportFolder = actaProConfig.getString("/xml/importFolder");
+        xmlTectonicsFile = actaProConfig.getString("/xml/tectonicsFile");
+
         updateLog("Configuration successfully read");
 
+    }
+
+    public void xmlImport() {
+        if (!run.compareAndSet(false, true)) {
+            updateLog("Previous import is still running, abort");
+            return;
+        }
+
+        String databaseName = database;
+        if (StringUtils.isBlank(databaseName) || "null".equals(databaseName)) {
+            Helper.setFehlerMeldung("intranda_administration_actapro_noDatabase");
+            run.set(false);
+            return;
+        }
+
+        String rootElementID = actaProConfig.getString("/inventory[@archiveName='" + databaseName + "']/@actaproId");
+        updateLog("Start XML import for inventory " + databaseName);
+        updateLog("Root element ID: " + rootElementID);
+
+        executor.submit(() -> {
+            try {
+                run.set(true);
+                lastPush = System.currentTimeMillis();
+
+                RecordGroup recordGroup = ArchiveManagementManager.getRecordGroupByTitle(databaseName);
+                if (recordGroup == null) {
+                    Helper.setFehlerMeldung("intranda_administration_actapro_databaseNotFound");
+                    run.set(false);
+                    return;
+                }
+                updateLog("Archive database loaded.");
+
+                Path importDir = Paths.get(xmlImportFolder);
+                if (!Files.isDirectory(importDir)) {
+                    updateLog("No XML files found in " + xmlImportFolder);
+                    run.set(false);
+                    return;
+                }
+                List<Path> allXmlPaths = new ArrayList<>();
+                try (Stream<Path> stream = Files.list(importDir)) {
+                    allXmlPaths = stream.filter(p -> p.getFileName().toString().endsWith(".xml"))
+                            .sorted(Comparator.comparing(p -> p.getFileName().toString()))
+                            .collect(Collectors.toList());
+                }
+                if (allXmlPaths.isEmpty()) {
+                    updateLog("No XML files found in " + xmlImportFolder);
+                    run.set(false);
+                    return;
+                }
+
+                List<Path> xmlFiles = new ArrayList<>();
+                if (StringUtils.isNotBlank(xmlTectonicsFile)) {
+                    Path tectonicsFile = importDir.resolve(xmlTectonicsFile);
+                    if (Files.exists(tectonicsFile)) {
+                        xmlFiles.add(tectonicsFile);
+                        updateLog("Added tectonics file: " + xmlTectonicsFile);
+                    }
+                }
+                for (Path p : allXmlPaths) {
+                    if (!p.getFileName().toString().equals(xmlTectonicsFile)) {
+                        xmlFiles.add(p);
+                    }
+                }
+                updateLog("Found " + xmlFiles.size() + " XML files to process.");
+
+                // Pass 1: build lightweight parent index (only DocKey -> parentDocKey strings)
+                Map<String, String> parentIndex = new LinkedHashMap<>();
+                int totalDocCount = 0;
+                for (Path xmlFile : xmlFiles) {
+                    try {
+                        int count = buildParentIndex(xmlFile, parentIndex);
+                        totalDocCount += count;
+                        updateLog("Indexed " + count + " documents from " + xmlFile.getFileName());
+                    } catch (Exception e) {
+                        log.error("Error indexing {}: {}", xmlFile.getFileName(), e.getMessage(), e);
+                        updateLog("Error indexing " + xmlFile.getFileName() + ": " + e.getMessage());
+                    }
+                }
+                updateLog("Index built: " + totalDocCount + " documents in " + xmlFiles.size() + " files.");
+
+                // Load existing nodes into cache to avoid per-document DB lookups
+                Map<String, Integer> nodeIdCache = loadNodeIdCache(recordGroup);
+                updateLog("Node ID cache loaded: " + nodeIdCache.size() + " existing entries.");
+
+                // Pass 2: import file by file, keeping only one file's documents in memory
+                int imported = 0;
+                for (Path xmlFile : xmlFiles) {
+                    updateLog("Importing: " + xmlFile.getFileName());
+                    try {
+                        Map<String, io.goobi.api.job.actapro.model.Document> fileDocs = parseXmlDocumentSet(xmlFile);
+                        for (io.goobi.api.job.actapro.model.Document doc : fileDocs.values()) {
+                            doc.setPath(buildXmlPath(doc.getDocKey(), parentIndex));
+                        }
+                        for (io.goobi.api.job.actapro.model.Document doc : fileDocs.values()) {
+                            try {
+                                importDocumentFromXml(doc, recordGroup, rootElementID, fileDocs, nodeIdCache);
+                                imported++;
+                                if (imported % 100 == 0) {
+                                    updateLog("Imported " + imported + " of " + totalDocCount + " documents");
+                                }
+                            } catch (Exception e) {
+                                log.error("Error importing {}: {}", doc.getDocKey(), e.getMessage(), e);
+                                updateLog("Error importing " + doc.getDocKey() + ": " + e.getMessage());
+                            }
+                        }
+                    } catch (Exception e) {
+                        log.error("Error processing {}: {}", xmlFile.getFileName(), e.getMessage(), e);
+                        updateLog("Error processing " + xmlFile.getFileName() + ": " + e.getMessage());
+                    }
+                }
+
+                updateLog("XML import finished. Processed " + imported + " documents.");
+            } catch (Exception e) {
+                log.error("Uncaught exception in XML import: {}", e.getMessage(), e);
+                updateLog("XML import error: " + e.getMessage());
+            } finally {
+                run.set(false);
+            }
+        });
+    }
+
+    static int buildParentIndex(Path xmlFile, Map<String, String> parentIndex) throws JDOMException, IOException {
+        SAXBuilder saxBuilder = new SAXBuilder();
+        org.jdom2.Document xmlDoc = saxBuilder.build(xmlFile.toFile());
+        Element root = xmlDoc.getRootElement();
+        int count = 0;
+        for (Element docEl : root.getChildren("Document", H1_NS)) {
+            String docKey = docEl.getAttributeValue("DocKey");
+            if (StringUtils.isBlank(docKey) || parentIndex.containsKey(docKey)) {
+                continue;
+            }
+            String parentDocKey = null;
+            Element blockEl = docEl.getChild("Block", H1_NS);
+            if (blockEl != null) {
+                outer: for (Element fieldEl : blockEl.getChildren("Field", H1_NS)) {
+                    if ("Ref_Gp".equals(fieldEl.getAttributeValue("Type"))) {
+                        for (Element subField : fieldEl.getChildren("Field", H1_NS)) {
+                            if ("Ref_DocKey".equals(subField.getAttributeValue("Type"))) {
+                                parentDocKey = subField.getAttributeValue("Value");
+                                break outer;
+                            }
+                        }
+                    }
+                }
+            }
+            parentIndex.put(docKey, parentDocKey);
+            count++;
+        }
+        return count;
+    }
+
+    static Map<String, io.goobi.api.job.actapro.model.Document> parseXmlDocumentSet(Path xmlFile) throws JDOMException, IOException {
+        Map<String, io.goobi.api.job.actapro.model.Document> result = new LinkedHashMap<>();
+        SAXBuilder saxBuilder = new SAXBuilder();
+        org.jdom2.Document xmlDoc = saxBuilder.build(xmlFile.toFile());
+        Element root = xmlDoc.getRootElement();
+
+        for (Element docEl : root.getChildren("Document", H1_NS)) {
+            io.goobi.api.job.actapro.model.Document doc = new io.goobi.api.job.actapro.model.Document();
+            doc.setDocKey(docEl.getAttributeValue("DocKey"));
+            doc.setDocTitle(docEl.getAttributeValue("DocTitle"));
+            doc.setCreatorID(docEl.getAttributeValue("CreatorID"));
+            doc.setOwnerId(docEl.getAttributeValue("OwnerID"));
+            doc.setCreationDate(docEl.getAttributeValue("CreationDate"));
+            doc.setChangeDate(docEl.getAttributeValue("ChangeDate"));
+
+            Element blockEl = docEl.getChild("Block", H1_NS);
+            if (blockEl != null) {
+                DocumentBlock block = new DocumentBlock();
+                block.setType(blockEl.getAttributeValue("Type"));
+                doc.setType(blockEl.getAttributeValue("Type"));
+                for (Element fieldEl : blockEl.getChildren("Field", H1_NS)) {
+                    block.addFieldsItem(parseXmlField(fieldEl));
+                }
+                doc.setBlock(block);
+            }
+
+            if (StringUtils.isNotBlank(doc.getDocKey())) {
+                result.put(doc.getDocKey(), doc);
+            }
+        }
+        return result;
+    }
+
+    static DocumentField parseXmlField(Element fieldEl) {
+        DocumentField field = new DocumentField();
+        field.setType(fieldEl.getAttributeValue("Type"));
+        field.setValue(fieldEl.getAttributeValue("Value"));
+        field.setPlainValue(fieldEl.getAttributeValue("value_plain"));
+        for (Element childEl : fieldEl.getChildren("Field", H1_NS)) {
+            field.addFieldsItem(parseXmlField(childEl));
+        }
+        return field;
+    }
+
+    static String buildXmlPath(String docKey, Map<String, String> parentIndex) {
+        List<String> pathParts = new ArrayList<>();
+        String current = docKey;
+        Set<String> visited = new HashSet<>();
+        while (current != null && !visited.contains(current)) {
+            pathParts.add(0, current);
+            visited.add(current);
+            current = parentIndex.get(current);
+        }
+        return String.join("; ", pathParts);
+    }
+
+    static String getParentDocKey(io.goobi.api.job.actapro.model.Document doc) {
+        if (doc == null || doc.getBlock() == null) {
+            return null;
+        }
+        for (DocumentField field : doc.getBlock().getFields()) {
+            if ("Ref_Gp".equals(field.getType())) {
+                for (DocumentField subfield : field.getFields()) {
+                    if ("Ref_DocKey".equals(subfield.getType())) {
+                        return subfield.getValue();
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    static String getDocOrder(io.goobi.api.job.actapro.model.Document doc) {
+        if (doc == null || doc.getBlock() == null) {
+            return null;
+        }
+        for (DocumentField field : doc.getBlock().getFields()) {
+            if ("Ref_Gp".equals(field.getType())) {
+                for (DocumentField subfield : field.getFields()) {
+                    if ("Ref_DocOrder".equals(subfield.getType())) {
+                        return subfield.getValue();
+                    }
+                }
+            }
+        }
+        return null;
     }
 
     public void downloadFromActaPro() {
@@ -273,6 +536,8 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                 }
 
                 updateLog("Archivemanagement database loaded.");
+                Map<String, Integer> nodeIdCache = loadNodeIdCache(recordGroup);
+                updateLog("Node ID cache loaded: " + nodeIdCache.size() + " existing entries.");
                 try (Client client = ClientBuilder.newClient()) {
                     updateLog("Try to authenticate.");
                     AuthenticationToken token = ActaProApi.authenticate(client, authServiceHeader, authServiceUrl, authServiceUsername,
@@ -290,10 +555,9 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                         updateLog("Root document with id " + rootElementID + " not found, abort.");
                         return;
                     }
-                    String documentId = importDocument(client, doc, recordGroup, rootElementID, token);
+                    String documentId = importDocument(client, doc, recordGroup, rootElementID, token, nodeIdCache);
                     if (StringUtils.isNotBlank(documentId) && !documentId.startsWith("Vz")) {
-                        importDocuments(client, token, documentId, recordGroup,
-                                rootElementID);
+                        importDocuments(client, token, documentId, recordGroup, rootElementID, nodeIdCache);
                     }
 
                 } catch (IOException e1) {
@@ -454,7 +718,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
 
                                 // update doc title
                                 for (IMetadataField emf : entry.getIdentityStatementAreaList()) {
-                                    if ("unittitle".equals(emf.getName())) {
+                                    if ("unittitle".equals(emf.getName()) && StringUtils.isBlank(doc.getDocTitle())) {
                                         doc.setDocTitle(emf.getValues().get(0).getValue());
                                     }
                                 }
@@ -481,7 +745,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
 
                                 // set doc title
                                 for (IMetadataField emf : entry.getIdentityStatementAreaList()) {
-                                    if ("unittitle".equals(emf.getName())) {
+                                    if ("unittitle".equals(emf.getName()) && StringUtils.isBlank(doc.getDocTitle())) {
                                         doc.setDocTitle(emf.getValues().get(0).getValue());
                                     }
                                 }
@@ -800,7 +1064,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
     }
 
     private void importDocuments(Client client, AuthenticationToken token, String parentId, RecordGroup recordGroup,
-            String rootElementID) throws IOException {
+            String rootElementID, Map<String, Integer> nodeIdCache) throws IOException {
         Queue<String> toProcess = new LinkedList<>();
         toProcess.add(parentId);
 
@@ -818,7 +1082,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
 
             String current = toProcess.poll();
             try {
-                List<String> children = searchChildren(client, token, current, recordGroup, rootElementID);
+                List<String> children = searchChildren(client, token, current, recordGroup, rootElementID, nodeIdCache);
                 toProcess.addAll(children);
             } catch (UnauthorizedException e) {
                 log.warn("Token expired while processing '{}', re-authenticating and retrying", current);
@@ -846,7 +1110,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
      */
 
     private List<String> searchChildren(Client client, AuthenticationToken token, String parentId, RecordGroup recordGroup,
-            String rootElementID) throws IOException {
+            String rootElementID, Map<String, Integer> nodeIdCache) throws IOException {
 
         List<String> answer = new ArrayList<>();
 
@@ -904,7 +1168,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                     for (Map<String, String> content : contentMap) {
                         if (content.get("path").contains(parentId)) {
                             String id = content.get("id");
-                            Integer entryId = ArchiveManagementManager.findNodeById(identifierFieldName, id);
+                            Integer entryId = nodeIdCache.get(id);
                             if (entryId == null) {
                                 Document doc = null;
                                 try {
@@ -924,11 +1188,12 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                                 } else {
                                     doc.setPath(content.get("path"));
                                     // only add documents from the selected archive
-                                    importDocument(client, doc, recordGroup, rootElementID, token);
+                                    importDocument(client, doc, recordGroup, rootElementID, token, nodeIdCache);
                                     String newId = doc.getDocKey();
                                     queue.add(newId);
                                 }
                             } else {
+                                // TODO currently we only import new documents, enable this by removing the  if (entryId == null) { part
                                 updateLog("Skip existing ID '" + id + "'");
                                 log.debug("Skip existing ID '" + id + "'");
                                 queue.add(id);
@@ -1005,7 +1270,8 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
         }
     }
 
-    private String importDocument(Client client, Document doc, RecordGroup recordGroup, String rootElementID, AuthenticationToken token) throws IOException {
+    private String importDocument(Client client, Document doc, RecordGroup recordGroup, String rootElementID, AuthenticationToken token,
+            Map<String, Integer> nodeIdCache) throws IOException {
         String documentId = doc.getDocKey();
         String parentNodeId = null;
         String docOrder = null;
@@ -1024,7 +1290,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
 
         log.debug("Document id: {}", documentId);
         // find matching ead entry
-        Integer entryId = ArchiveManagementManager.findNodeById(identifierFieldName, documentId);
+        Integer entryId = nodeIdCache.get(documentId);
         if (entryId != null) {
 
             updateLog("Found node with with ACTApro ID '" + documentId + "', update existing node.");
@@ -1037,10 +1303,10 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
             // check if document still have the same parent node
             if (parentNodeId != null && docOrder != null && entry.getParentId() != null) {
                 // parentNode == null is the root element, should not be possible
-                Integer parentEntryId = ArchiveManagementManager.findNodeById(identifierFieldName, parentNodeId);
+                Integer parentEntryId = nodeIdCache.get(parentNodeId);
                 if (parentEntryId == null) {
                     // node has been changed to a new parent node that does not yet exist
-                    // TODO this case should not be possible because the new parent node is included in the
+                    // this case should not be possible because the new parent node is included in the
                     // document list before the current node and was created at this point
                 } else if (parentEntryId.intValue() != entry.getParentId()) {
                     // node has a different parent
@@ -1075,7 +1341,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                         rootElementFound = true;
                     }
                     if (rootElementFound) {
-                        Integer parentEntryId = ArchiveManagementManager.findNodeById(identifierFieldName, path);
+                        Integer parentEntryId = nodeIdCache.get(path);
 
                         if (parentEntryId != null) {
                             // ancestor element exists
@@ -1083,7 +1349,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                         } else {
                             // ancestor element does not exist, create it as sub element of last existing node
                             if (lastElementId == null) {
-                                lastElementId = ArchiveManagementManager.findNodeById(identifierFieldName, rootElementID);
+                                lastElementId = nodeIdCache.get(rootElementID);
                             }
 
                             Document currentDoc = null;
@@ -1097,62 +1363,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                                 return null;
                             }
                             if (currentDoc != null) {
-                                int orderNumber = 0;
-
-                                for (DocumentField field : currentDoc.getBlock().getFields()) {
-                                    String fieldType = field.getType();
-                                    if ("Ref_Gp".equals(fieldType)) {
-                                        for (DocumentField subfield : field.getFields()) {
-                                            if ("Ref_DocOrder".equals(subfield.getType())) {
-                                                orderNumber = Integer.parseInt(subfield.getValue());
-                                            }
-                                        }
-                                    }
-                                }
-
-                                SimpleEadEntry parent = loadSimpleEntry(lastElementId);
-
-                                ExtendedEadEntry entry = new ExtendedEadEntry(orderNumber, parent.getHierarchy() + 1);
-                                entry.setParentId(parent.getId());
-                                if (StringUtils.isBlank(parent.getSequence())) {
-                                    entry.setSequence(parent.getOrder() + "");
-                                } else {
-                                    entry.setSequence(parent.getSequence() + "." + parent.getOrder());
-                                }
-                                entry.setId("id_" + UUID.randomUUID());
-
-                                //  add all metadata from document
-
-                                entry.setLabel(currentDoc.getDocTitle());
-
-                                for (IMetadataField emf : config.getConfiguredFields()) {
-                                    if (emf.isGroup()) {
-                                        NodeInitializer.loadGroupMetadata(entry, emf, null);
-                                    } else if ("unittitle".equals(emf.getName())) {
-                                        List<IValue> titleData = new ArrayList<>();
-                                        titleData.add(new ExtendendValue(null, currentDoc.getDocTitle(), null, null));
-                                        IMetadataField toAdd = NodeInitializer.addFieldToEntry(entry, emf, titleData);
-                                        NodeInitializer.addFieldToNode(entry, toAdd);
-                                    } else if (emf.getName().equals(identifierFieldName)) {
-                                        List<IValue> idData = new ArrayList<>();
-                                        idData.add(new ExtendendValue(null, currentDoc.getDocKey(), null, null));
-                                        IMetadataField toAdd = NodeInitializer.addFieldToEntry(entry, emf, idData);
-                                        NodeInitializer.addFieldToNode(entry, toAdd);
-                                    } else {
-                                        IMetadataField toAdd = NodeInitializer.addFieldToEntry(entry, emf, null);
-                                        NodeInitializer.addFieldToNode(entry, toAdd);
-                                    }
-                                }
-                                parseDocumentMetadata(currentDoc, entry);
-
-                                entry.setNodeType(nodes.get(currentDoc.getType()));
-
-                                // move to correct position within the parent
-                                entry.calculateFingerprint();
-
-                                saveNode(recordGroup.getId(), entry);
-                                lastElementId = entry.getDatabaseId();
-
+                                lastElementId = createNodeForDocument(currentDoc, lastElementId, recordGroup, nodeIdCache);
                             }
                         }
                     }
@@ -1161,6 +1372,91 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
         }
         return documentId;
 
+    }
+
+    private Map<String, Integer> loadNodeIdCache(RecordGroup recordGroup) {
+        Map<String, Integer> cache = new HashMap<>();
+        String sql = "SELECT id, ExtractValue(data, '/xml/" + identifierFieldName + "') AS dockey "
+                + "FROM archive_record_node WHERE archive_record_group_id = ?";
+        ResultSetHandler<Void> handler = rs -> {
+            while (rs.next()) {
+                String key = rs.getString("dockey");
+                int id = rs.getInt("id");
+                if (StringUtils.isNotBlank(key)) {
+                    cache.put(key, id);
+                }
+            }
+            return null;
+        };
+        try (Connection connection = MySQLHelper.getInstance().getConnection()) {
+            new QueryRunner().query(connection, sql, handler, recordGroup.getId());
+        } catch (SQLException e) {
+            log.error("Error loading node ID cache: {}", e.getMessage(), e);
+        }
+        return cache;
+    }
+
+    private void importDocumentFromXml(io.goobi.api.job.actapro.model.Document doc, RecordGroup recordGroup,
+            String rootElementID, Map<String, io.goobi.api.job.actapro.model.Document> allDocuments,
+            Map<String, Integer> nodeIdCache) {
+        String documentId = doc.getDocKey();
+
+        Integer entryId = nodeIdCache.get(documentId);
+        if (entryId != null) {
+            ExtendedEadEntry entry = loadExtendendEntry(entryId);
+            NodeInitializer.initEadNodeWithMetadata(entry, getConfig().getConfiguredFields());
+            String fingerprintBefore = entry.getFingerprint();
+
+            String parentNodeId = getParentDocKey(doc);
+            String docOrder = getDocOrder(doc);
+            if (parentNodeId != null && docOrder != null && entry.getParentId() != null) {
+                Integer parentEntryId = nodeIdCache.get(parentNodeId);
+                if (parentEntryId != null && parentEntryId.intValue() != entry.getParentId()) {
+                    entry.setParentId(parentEntryId);
+                    try {
+                        entry.setOrderNumber(Integer.parseInt(docOrder));
+                    } catch (NumberFormatException e) {
+                        log.error("Cannot parse Ref_DocOrder '{}': {}", docOrder, e.getMessage());
+                    }
+                    saveNode(recordGroup.getId(), entry);
+                }
+            }
+
+            parseDocumentMetadata(doc, entry);
+            if (!fingerprintBefore.equals(entry.getFingerprint())) {
+                saveNode(recordGroup.getId(), entry);
+            }
+        } else {
+            if (doc.getPath() == null) {
+                return;
+            }
+            String[] paths = doc.getPath().split(";");
+            Integer lastElementId = null;
+            boolean rootElementFound = false;
+
+            for (String path : paths) {
+                path = path.trim();
+                if (path.equals(rootElementID)) {
+                    rootElementFound = true;
+                }
+                if (rootElementFound) {
+                    Integer parentEntryId = nodeIdCache.get(path);
+                    if (parentEntryId != null) {
+                        lastElementId = parentEntryId;
+                    } else {
+                        if (lastElementId == null) {
+                            lastElementId = nodeIdCache.get(rootElementID);
+                        }
+                        io.goobi.api.job.actapro.model.Document currentDoc = allDocuments.get(path);
+                        if (currentDoc != null) {
+                            lastElementId = createNodeForDocument(currentDoc, lastElementId, recordGroup, nodeIdCache);
+                        } else {
+                            updateLog("Document '" + path + "' not found in XML files, skipping.");
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private void saveNode(Integer id, ExtendedEadEntry entry) {
@@ -1272,6 +1568,57 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
             log.error(e);
         }
         return null;
+    }
+
+    private Integer createNodeForDocument(io.goobi.api.job.actapro.model.Document doc, Integer parentDbId, RecordGroup recordGroup,
+            Map<String, Integer> nodeIdCache) {
+        int orderNumber = 0;
+        String orderStr = getDocOrder(doc);
+        if (orderStr != null) {
+            try {
+                orderNumber = Integer.parseInt(orderStr);
+            } catch (NumberFormatException e) {
+                log.error("Cannot parse Ref_DocOrder value '{}': {}", orderStr, e.getMessage());
+            }
+        }
+
+        SimpleEadEntry parent = loadSimpleEntry(parentDbId);
+        ExtendedEadEntry entry = new ExtendedEadEntry(orderNumber, parent.getHierarchy() + 1);
+        entry.setParentId(parent.getId());
+        if (StringUtils.isBlank(parent.getSequence())) {
+            entry.setSequence(parent.getOrder() + "");
+        } else {
+            entry.setSequence(parent.getSequence() + "." + parent.getOrder());
+        }
+        entry.setId("id_" + UUID.randomUUID());
+        entry.setLabel(doc.getDocTitle());
+
+        for (IMetadataField emf : config.getConfiguredFields()) {
+            if (emf.isGroup()) {
+                NodeInitializer.loadGroupMetadata(entry, emf, null);
+            } else if ("unittitle".equals(emf.getName())) {
+                List<IValue> titleData = new ArrayList<>();
+                titleData.add(new ExtendendValue(null, doc.getDocTitle(), null, null));
+                IMetadataField toAdd = NodeInitializer.addFieldToEntry(entry, emf, titleData);
+                NodeInitializer.addFieldToNode(entry, toAdd);
+            } else if (emf.getName().equals(identifierFieldName)) {
+                List<IValue> idData = new ArrayList<>();
+                idData.add(new ExtendendValue(null, doc.getDocKey(), null, null));
+                IMetadataField toAdd = NodeInitializer.addFieldToEntry(entry, emf, idData);
+                NodeInitializer.addFieldToNode(entry, toAdd);
+            } else {
+                IMetadataField toAdd = NodeInitializer.addFieldToEntry(entry, emf, null);
+                NodeInitializer.addFieldToNode(entry, toAdd);
+            }
+        }
+        parseDocumentMetadata(doc, entry);
+        entry.setNodeType(nodes.get(doc.getType()));
+        entry.calculateFingerprint();
+        saveNode(recordGroup.getId(), entry);
+        if (nodeIdCache != null && doc.getDocKey() != null) {
+            nodeIdCache.put(doc.getDocKey(), entry.getDatabaseId());
+        }
+        return entry.getDatabaseId();
     }
 
     private final ResultSetHandler<ExtendedEadEntry> rresultSetToExtendedNodeHandler = new ResultSetHandler<>() {

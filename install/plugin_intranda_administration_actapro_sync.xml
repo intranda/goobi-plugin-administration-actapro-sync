@@ -1,4 +1,13 @@
 <config>
+
+    <!-- enable this to import the data from actapro xml files instead of the rest api-->
+    <xml enabled="true">
+        <!-- folder with the xml file -->
+        <importFolder>/opt/digiverso/actapro</importFolder>
+        <!-- tectonics file, will be imported first -->
+        <tectonicsFile>tectonics.xml</tectonicsFile>
+    </xml>  
+
     <authentication>
         <authServiceUrl>http://localhost:8080/AuthService-ACTApro/oauth2/token</authServiceUrl>
         <authServiceHeader>Authorization: Basic ABCDEFGEHIJKLMNOPQRSXYZ</authServiceHeader>

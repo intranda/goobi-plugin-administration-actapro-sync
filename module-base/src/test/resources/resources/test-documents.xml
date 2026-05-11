@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<h1:DocumentSet xmlns:h1="http://www.startext.de/HiDA/DefService/XMLSchema">
+  <h1:ContentInfo>
+    <h1:Format>HIDA-DOC1-XML</h1:Format>
+  </h1:ContentInfo>
+  <h1:Document DocKey="Arch    test-arch-001" CreatorID="ACTAPRO" OwnerID="ACTAPRO" CreationDate="01.01.2020" ChangeDate="01.01.2024" DocTitle="Test Archive">
+    <h1:Block Type="Arch">
+      <h1:Field Type="ChangeUserID" Value="testuser"/>
+    </h1:Block>
+  </h1:Document>
+  <h1:Document DocKey="Tekt    test-tekt-001" CreatorID="ACTAPRO" CreationDate="01.01.2020" ChangeDate="01.01.2024" DocTitle="Test Tektonik">
+    <h1:Block Type="Tekt">
+      <h1:Field Type="Ref_Gp">
+        <h1:Field Type="Ref_DocKey" Value="Arch    test-arch-001"/>
+        <h1:Field Type="Ref_Doctype" Value="Arch"/>
+        <h1:Field Type="Ref_Type" Value="P"/>
+        <h1:Field Type="Ref_DocOrder" Value="1"/>
+      </h1:Field>
+      <h1:Field Type="Laufzeit" Value="1900-2000" value_plain="Laufzeit 1900-2000"/>
+    </h1:Block>
+  </h1:Document>
+  <h1:Document DocKey="Best    test-best-001" CreatorID="ACTAPRO" CreationDate="01.01.2020" ChangeDate="01.01.2024" DocTitle="Test Bestand">
+    <h1:Block Type="Best">
+      <h1:Field Type="Ref_Gp">
+        <h1:Field Type="Ref_DocKey" Value="Tekt    test-tekt-001"/>
+        <h1:Field Type="Ref_Doctype" Value="Tekt"/>
+        <h1:Field Type="Ref_Type" Value="P"/>
+        <h1:Field Type="Ref_DocOrder" Value="2"/>
+      </h1:Field>
+    </h1:Block>
+  </h1:Document>
+</h1:DocumentSet>
