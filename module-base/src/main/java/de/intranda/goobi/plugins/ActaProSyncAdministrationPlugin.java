@@ -116,9 +116,6 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
     @Setter
     private LocalDate startDate = LocalDate.now();
 
-    //    @Getter
-    //    @Setter
-    //    private String startDate = "2023-04-14T15:33:44Z";
     @Getter
     @Setter
     private LocalDate endDate;
@@ -1168,36 +1165,29 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                     for (Map<String, String> content : contentMap) {
                         if (content.get("path").contains(parentId)) {
                             String id = content.get("id");
-                            Integer entryId = nodeIdCache.get(id);
-                            if (entryId == null) {
-                                Document doc = null;
-                                try {
-                                    doc = ActaProApi.getDocumentByKey(client, token, connectorUrl, id);
-                                } catch (UnauthorizedException e) {
-                                    throw e;
-                                } catch (Exception e) {
-                                    log.error("Unable to retrieve document with id '" + id + "'", e);
-                                    log.error(e);
-                                }
-                                if (doc == null) {
-                                    //                            if (id.startsWith("Vz")) {
-                                    // if we found the deepest hierarchy type, we set success to true, so that the entire import does not fail.
-                                    // The individual document cannot be imported, but the import itself can continue.
-                                    // But if an element from a higher hierarchy fails, we abort because we cannot build a tree without this node.
-                                    //                            }
-                                } else {
-                                    doc.setPath(content.get("path"));
-                                    // only add documents from the selected archive
-                                    importDocument(client, doc, recordGroup, rootElementID, token, nodeIdCache);
-                                    String newId = doc.getDocKey();
-                                    queue.add(newId);
-                                }
-                            } else {
-                                // TODO currently we only import new documents, enable this by removing the  if (entryId == null) { part
-                                updateLog("Skip existing ID '" + id + "'");
-                                log.debug("Skip existing ID '" + id + "'");
-                                queue.add(id);
+                            Document doc = null;
+                            try {
+                                doc = ActaProApi.getDocumentByKey(client, token, connectorUrl, id);
+                            } catch (UnauthorizedException e) {
+                                throw e;
+                            } catch (Exception e) {
+                                log.error("Unable to retrieve document with id '" + id + "'", e);
+                                log.error(e);
                             }
+                            if (doc == null) {
+                                //                            if (id.startsWith("Vz")) {
+                                // if we found the deepest hierarchy type, we set success to true, so that the entire import does not fail.
+                                // The individual document cannot be imported, but the import itself can continue.
+                                // But if an element from a higher hierarchy fails, we abort because we cannot build a tree without this node.
+                                //                            }
+                            } else {
+                                doc.setPath(content.get("path"));
+                                // only add documents from the selected archive
+                                importDocument(client, doc, recordGroup, rootElementID, token, nodeIdCache);
+                                String newId = doc.getDocKey();
+                                queue.add(newId);
+                            }
+
                         }
                     }
 
