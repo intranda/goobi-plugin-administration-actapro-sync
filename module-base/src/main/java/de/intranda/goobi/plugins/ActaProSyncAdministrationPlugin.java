@@ -103,6 +103,8 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
 
     private static final Namespace H1_NS = Namespace.getNamespace("h1", "http://www.startext.de/HiDA/DefService/XMLSchema");
 
+    private static final java.util.regex.Pattern VALID_XML_ELEMENT_NAME = java.util.regex.Pattern.compile("^[a-zA-Z_][a-zA-Z0-9_\\-\\.]*$");
+
     @Getter
     private String title = "intranda_administration_actapro_sync";
 
@@ -1366,6 +1368,10 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
 
     private Map<String, Integer> loadNodeIdCache(RecordGroup recordGroup) {
         Map<String, Integer> cache = new HashMap<>();
+        if (!VALID_XML_ELEMENT_NAME.matcher(identifierFieldName).matches()) {
+            log.error("Invalid identifierFieldName '{}' - rejected to prevent injection", identifierFieldName);
+            return cache;
+        }
         String sql = "SELECT id, ExtractValue(data, '/xml/" + identifierFieldName + "') AS dockey "
                 + "FROM archive_record_node WHERE archive_record_group_id = ?";
         ResultSetHandler<Void> handler = rs -> {
