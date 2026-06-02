@@ -1081,7 +1081,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
 
             String current = toProcess.poll();
             try {
-                List<String> children = searchChildren(client, token, current, recordGroup, rootElementID, nodeIdCache);
+                List<String> children = searchChildren(client, token, current, recordGroup, rootElementID, nodeIdCache, false);
                 toProcess.addAll(children);
             } catch (UnauthorizedException e) {
                 log.warn("Token expired while processing '{}', re-authenticating and retrying", current);
@@ -1097,6 +1097,65 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
         }
     }
 
+    public void partialUpdate() {
+
+        if (!run.compareAndSet(false, true)) {
+            // abort, if import is running
+            updateLog("Previous import is still running, abort");
+            return;
+        }
+
+        String databaseName = database;
+
+        if (StringUtils.isBlank(databaseName) || "null".equals(databaseName)) {
+            Helper.setFehlerMeldung("intranda_administration_actapro_noDatabase");
+            run.set(false);
+
+            return;
+        }
+        String rootElementID = actaProConfig.getString("/inventory[@archiveName='" + database + "']/@actaproId");
+        // check if database exist, load it
+        updateLog("Start import for inventory " + databaseName);
+        updateLog("ACTApro root element is " + rootElementID);
+        executor.submit(() -> {
+            try {
+                run.set(true);
+                lastPush = System.currentTimeMillis();
+                RecordGroup recordGroup = ArchiveManagementManager.getRecordGroupByTitle(databaseName);
+                if (recordGroup == null) {
+                    Helper.setFehlerMeldung("intranda_administration_actapro_databaseNotFound");
+                    run.set(false);
+                    return;
+                }
+
+                updateLog("Archivemanagement database loaded.");
+                Map<String, Integer> nodeIdCache = loadNodeIdCache(recordGroup);
+                updateLog("Node ID cache loaded: " + nodeIdCache.size() + " existing entries.");
+                try (Client client = ClientBuilder.newClient()) {
+                    updateLog("Try to authenticate.");
+                    AuthenticationToken token = ActaProApi.authenticate(client, authServiceHeader, authServiceUrl, authServiceUsername,
+                            authServicePassword);
+                    updateLog("Authenticated.");
+
+                    // TODO call it for each day between start and end
+
+                    searchChildren(client, token, rootElementID, recordGroup, rootElementID, nodeIdCache, true);
+
+                } catch (IOException e1) {
+                    log.error(e1);
+                }
+
+                updateLog("Imported all documents");
+            } catch (Exception e) {
+                log.error("Uncaught exception im Import: {}", e.getMessage(), e);
+                updateLog("Import error: " + e.getMessage());
+            } finally {
+                run.set(false);
+            }
+        });
+
+    }
+
     /**
      * 
      * Find all documents created or modified after a given date
@@ -1109,7 +1168,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
      */
 
     private List<String> searchChildren(Client client, AuthenticationToken token, String parentId, RecordGroup recordGroup,
-            String rootElementID, Map<String, Integer> nodeIdCache) throws IOException {
+            String rootElementID, Map<String, Integer> nodeIdCache, boolean partialUpdate) throws IOException {
 
         List<String> answer = new ArrayList<>();
 
@@ -1133,20 +1192,16 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                 searchRequest.addFiltersItem(filter);
             }
         }
-        searchRequest.addFieldsItem("Ref_DocKey");
-        DocumentSearchFilter filter = new DocumentSearchFilter();
-        filter.fieldName("Ref_DocKey");
-        filter.setOperator(OperatorEnum.EQUAL);
-        filter.fieldValue(parentId);
-        searchRequest.addFiltersItem(filter);
 
-        updateLog("Search for documents with parent id " + parentId);
-        //        searchRequest.addDocumentTypesItem("Arch");
-        //        searchRequest.addDocumentTypesItem("Tekt");
-        //        searchRequest.addDocumentTypesItem("Best");
-        //        searchRequest.addDocumentTypesItem("Klas");
-        //        searchRequest.addDocumentTypesItem("Ser");
-        //        searchRequest.addDocumentTypesItem("Vz");
+        if (!partialUpdate) {
+            searchRequest.addFieldsItem("Ref_DocKey");
+            DocumentSearchFilter filter = new DocumentSearchFilter();
+            filter.fieldName("Ref_DocKey");
+            filter.setOperator(OperatorEnum.EQUAL);
+            filter.fieldValue(parentId);
+            searchRequest.addFiltersItem(filter);
+            updateLog("Search for documents with parent id " + parentId);
+        }
 
         // post request
         boolean isLast = false;

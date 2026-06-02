@@ -96,15 +96,26 @@
                         jsf:rendered="#{AdministrationForm.administrationPlugin.enableXmlImport}"
                         jsf:action="#{AdministrationForm.administrationPlugin.xmlImport}"
                         aria-label="#{msgs.plugin_administration_xmlImport}"
-                        title="#{msgs.plugin_administration_xmlImport}"
+                        title="#{msgs.XmlImport}"
                         class="btn btn-blank">
                         <span
                             class="fa fa-download me-2"
                             aria-hidden="true"></span>
-                        <h:outputText value="#{msgs.plugin_administration_xmlImport}" />
+                        <h:outputText value="#{msgs.XmlImport}" />
                     </button>
                 
-                
+                      <button
+                        jsf:rendered="#{AdministrationForm.administrationPlugin.enableXmlImport}"
+                        jsf:action="#{AdministrationForm.administrationPlugin.partialUpdate}"
+                        aria-label="#{msgs.partialUpdate}"
+                        title="#{msgs.partialUpdate}"
+                        class="btn btn-blank">
+                        <span
+                            class="fa fa-download me-2"
+                            aria-hidden="true"></span>
+                        <h:outputText value="#{msgs.partialUpdate}" />
+                    </button>
+                    
                     <button
                         jsf:action="#{AdministrationForm.administrationPlugin.downloadFromActaPro}"
                         aria-label="#{msgs.plugin_administration_downloadFromActaPro}"
