@@ -4,9 +4,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.sql.Connection;
-import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -14,7 +11,6 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
@@ -32,8 +28,6 @@ import java.util.stream.Stream;
 
 import org.apache.commons.collections4.queue.CircularFifoQueue;
 import org.apache.commons.configuration.ConfigurationException;
-import org.apache.commons.dbutils.QueryRunner;
-import org.apache.commons.dbutils.ResultSetHandler;
 import org.apache.commons.lang3.StringUtils;
 import org.goobi.beans.Process;
 import org.goobi.interfaces.IEadEntry;
@@ -56,7 +50,6 @@ import de.intranda.goobi.plugins.persistence.ArchiveManagementManager;
 import de.intranda.goobi.plugins.persistence.NodeInitializer;
 import de.sub.goobi.helper.Helper;
 import de.sub.goobi.helper.exceptions.SwapException;
-import de.sub.goobi.persistence.managers.MySQLHelper;
 import de.sub.goobi.persistence.managers.ProcessManager;
 import io.goobi.api.job.actapro.model.ActaProApi;
 import io.goobi.api.job.actapro.model.ActaProApiConfiguration;
@@ -70,6 +63,7 @@ import io.goobi.api.job.actapro.model.DocumentSearchParams;
 import io.goobi.api.job.actapro.model.ErrorResponse;
 import io.goobi.api.job.actapro.model.ExtendedEadEntry;
 import io.goobi.api.job.actapro.model.MetadataMapping;
+import io.goobi.api.job.actapro.model.NodeApi;
 import io.goobi.api.job.actapro.model.SearchResultPage;
 import io.goobi.api.job.actapro.model.SimpleEadEntry;
 import io.goobi.api.job.actapro.model.UnauthorizedException;
@@ -97,8 +91,6 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
     private static final long serialVersionUID = 2632106883746583247L;
 
     private static final Namespace H1_NS = Namespace.getNamespace("h1", "http://www.startext.de/HiDA/DefService/XMLSchema");
-
-    private static final java.util.regex.Pattern VALID_XML_ELEMENT_NAME = java.util.regex.Pattern.compile("^[a-zA-Z_][a-zA-Z0-9_\\-\\.]*$");
 
     @Getter
     private String title = "intranda_administration_actapro_sync";
@@ -236,7 +228,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                 updateLog("Index built: " + totalDocCount + " documents in " + xmlFiles.size() + " files.");
 
                 // Load existing nodes into cache to avoid per-document DB lookups
-                Map<String, Integer> nodeIdCache = loadNodeIdCache(recordGroup);
+                Map<String, Integer> nodeIdCache = NodeApi.loadNodeIdCache(recordGroup, actaProConfig.getIdentifierFieldName());
                 updateLog("Node ID cache loaded: " + nodeIdCache.size() + " existing entries.");
 
                 // Pass 2: import file by file, keeping only one file's documents in memory
@@ -378,22 +370,6 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
         return null;
     }
 
-    static String getDocOrder(io.goobi.api.job.actapro.model.Document doc) {
-        if (doc == null || doc.getBlock() == null) {
-            return null;
-        }
-        for (DocumentField field : doc.getBlock().getFields()) {
-            if ("Ref_Gp".equals(field.getType())) {
-                for (DocumentField subfield : field.getFields()) {
-                    if ("Ref_DocOrder".equals(subfield.getType())) {
-                        return subfield.getValue();
-                    }
-                }
-            }
-        }
-        return null;
-    }
-
     public void downloadFromActaPro() {
         // 1.) search for document with root id, initialize and import it
         // 2.) search for all documents with the root id as parent id
@@ -433,7 +409,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                 }
 
                 updateLog("Archivemanagement database loaded.");
-                Map<String, Integer> nodeIdCache = loadNodeIdCache(recordGroup);
+                Map<String, Integer> nodeIdCache = NodeApi.loadNodeIdCache(recordGroup, actaProConfig.getIdentifierFieldName());
                 updateLog("Node ID cache loaded: " + nodeIdCache.size() + " existing entries.");
                 try (Client client = ClientBuilder.newClient()) {
                     updateLog("Try to authenticate.");
@@ -470,83 +446,6 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                 run.set(false);
             }
         });
-    }
-
-    private void parseDocumentMetadata(Document doc, IEadEntry entry) {
-        DocumentBlock block = doc.getBlock();
-
-        for (DocumentField field : block.getFields()) {
-
-            String fieldType = field.getType();
-            // find ead metadata name
-
-            DocumentField matchedField = null;
-            // first check, if field name is used in a group // has sub fields
-            for (MetadataMapping mm : actaProConfig.getMetadataFields()) {
-                if (mm.getJsonGroupType().equals(fieldType)) {
-                    for (DocumentField subfield : field.getFields()) {
-                        String subType = subfield.getType();
-                        if (subType.equals(mm.getJsonType())) {
-                            matchedField = subfield;
-                        }
-                    }
-                    // if not, search for regular data
-                } else if (mm.getJsonType().equals(fieldType)) {
-                    matchedField = field;
-                }
-
-                if (matchedField != null) {
-                    addMetadataValue(entry, mm, matchedField);
-                }
-            }
-        }
-        entry.calculateFingerprint();
-    }
-
-    private void addMetadataValue(IEadEntry entry, MetadataMapping matchedMapping, DocumentField matchedField) {
-        String value = matchedField.getPlainValue();
-        if (StringUtils.isBlank(value)) {
-            value = matchedField.getValue();
-        }
-
-        switch (matchedMapping.getEadArea()) {
-            case "1":
-                for (IMetadataField emf : entry.getIdentityStatementAreaList()) {
-                    // add/replace value
-                    saveValue(matchedMapping, value, emf);
-                }
-                break;
-            case "2":
-                for (IMetadataField emf : entry.getContextAreaList()) {
-                    saveValue(matchedMapping, value, emf);
-                }
-                break;
-            case "3":
-                for (IMetadataField emf : entry.getContentAndStructureAreaAreaList()) {
-                    saveValue(matchedMapping, value, emf);
-                }
-                break;
-            case "4":
-                for (IMetadataField emf : entry.getAccessAndUseAreaList()) {
-                    saveValue(matchedMapping, value, emf);
-                }
-                break;
-            case "5":
-                for (IMetadataField emf : entry.getAlliedMaterialsAreaList()) {
-                    saveValue(matchedMapping, value, emf);
-                }
-                break;
-            case "6":
-                for (IMetadataField emf : entry.getNotesAreaList()) {
-                    saveValue(matchedMapping, value, emf);
-                }
-                break;
-            case "7":
-                for (IMetadataField emf : entry.getDescriptionControlAreaList()) {
-                    saveValue(matchedMapping, value, emf);
-                }
-                break;
-        }
     }
 
     public void uploadToActaPro() {
@@ -744,13 +643,13 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                                         }
                                     }
                                 } finally {
-                                    clearNode(parent);
+                                    NodeApi.clearNode(parent);
                                 }
 
                                 ArchiveManagementManager.saveNode(recordGroup.getId(), entry);
                             }
                         } finally {
-                            clearNode(entry);
+                            NodeApi.clearNode(entry);
                         }
                     }
                 } finally {
@@ -956,7 +855,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                         }
                     }
                 } finally {
-                    clearNode(parent);
+                    NodeApi.clearNode(parent);
                 }
             }
         }
@@ -1030,7 +929,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                 }
 
                 updateLog("Archivemanagement database loaded.");
-                Map<String, Integer> nodeIdCache = loadNodeIdCache(recordGroup);
+                Map<String, Integer> nodeIdCache = NodeApi.loadNodeIdCache(recordGroup, actaProConfig.getIdentifierFieldName());
                 updateLog("Node ID cache loaded: " + nodeIdCache.size() + " existing entries.");
                 try (Client client = ClientBuilder.newClient()) {
                     updateLog("Try to authenticate.");
@@ -1038,8 +937,6 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                             actaProConfig.getAuthServiceUrl(), actaProConfig.getAuthServiceUsername(),
                             actaProConfig.getAuthServicePassword());
                     updateLog("Authenticated.");
-
-                    // TODO call it for each day between start and end
 
                     searchChildren(client, token, rootElementID, recordGroup, rootElementID, nodeIdCache, true);
 
@@ -1078,10 +975,8 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
 
         searchRequest.query("*");
         if (startDate != null) {
-            searchRequest.getFields().add("crdate");
-
             DocumentSearchFilter filter = new DocumentSearchFilter();
-            filter.fieldName("crdate");
+            filter.fieldName("chdate");
             filter.setOperator(OperatorEnum.GREATER_THAN_OR_EQUAL_TO);
             filter.fieldValue(requestDateFormatter.format(startDate) + "T00:00:00Z");
             searchRequest.addFiltersItem(filter);
@@ -1133,13 +1028,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                                 log.error("Unable to retrieve document with id '" + id + "'", e);
                                 log.error(e);
                             }
-                            if (doc == null) {
-                                //                            if (id.startsWith("Vz")) {
-                                // if we found the deepest hierarchy type, we set success to true, so that the entire import does not fail.
-                                // The individual document cannot be imported, but the import itself can continue.
-                                // But if an element from a higher hierarchy fails, we abort because we cannot build a tree without this node.
-                                //                            }
-                            } else {
+                            if (doc != null) {
                                 doc.setPath(content.get("path"));
                                 // only add documents from the selected archive
                                 importDocument(client, doc, recordGroup, rootElementID, token, nodeIdCache);
@@ -1181,29 +1070,35 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
         return answer;
     }
 
-    private void saveValue(MetadataMapping matchedMapping, String value, IMetadataField emf) {
-        if (StringUtils.isNotBlank(matchedMapping.getEadGroup())) {
-            if (emf.getName().equals(matchedMapping.getEadGroup())) {
-                IMetadataGroup grp = emf.getGroups().get(0);
-                for (IMetadataField f : grp.getFields()) {
-                    if (f.getName().equals(matchedMapping.getEadField())) {
-                        if (!f.getValues().isEmpty()) {
-                            f.getValues().get(0).setValue(value);
-                        } else {
-                            f.addValue();
-                            f.getValues().get(0).setValue(value);
+    private void parseDocumentMetadata(Document doc, IEadEntry entry) {
+        DocumentBlock block = doc.getBlock();
+
+        for (DocumentField field : block.getFields()) {
+
+            String fieldType = field.getType();
+            // find ead metadata name
+
+            DocumentField matchedField = null;
+            // first check, if field name is used in a group // has sub fields
+            for (MetadataMapping mm : actaProConfig.getMetadataFields()) {
+                if (mm.getJsonGroupType().equals(fieldType)) {
+                    for (DocumentField subfield : field.getFields()) {
+                        String subType = subfield.getType();
+                        if (subType.equals(mm.getJsonType())) {
+                            matchedField = subfield;
                         }
                     }
+                    // if not, search for regular data
+                } else if (mm.getJsonType().equals(fieldType)) {
+                    matchedField = field;
+                }
+
+                if (matchedField != null) {
+                    NodeApi.addMetadataValue(entry, mm, matchedField);
                 }
             }
-        } else if (emf.getName().equals(matchedMapping.getEadField())) {
-            if (emf.getValues() != null && !emf.getValues().isEmpty()) {
-                emf.getValues().get(0).setValue(value);
-            } else {
-                emf.addValue();
-                emf.getValues().get(0).setValue(value);
-            }
         }
+        entry.calculateFingerprint();
     }
 
     @Override
@@ -1244,7 +1139,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
 
             updateLog("Found node with with ACTApro ID '" + documentId + "', update existing node.");
 
-            ExtendedEadEntry entry = loadExtendendEntry(entryId);
+            ExtendedEadEntry entry = NodeApi.loadExtendendEntry(entryId);
 
             NodeInitializer.initEadNodeWithMetadata(entry, actaProConfig.getConfig().getConfiguredFields());
             String fingerprintBeforeImport = entry.getFingerprint();
@@ -1262,7 +1157,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                     entry.setParentId(parentEntryId);
                     entry.setOrderNumber(Integer.parseInt(docOrder));
                     // move to correct position within the parent
-                    saveNode(recordGroup.getId(), entry);
+                    NodeApi.saveNode(recordGroup.getId(), entry);
                 }
             }
 
@@ -1272,7 +1167,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
             String fingerprintAfterImport = entry.getFingerprint();
             // save, if metadata was changed
             if (!fingerprintBeforeImport.equals(fingerprintAfterImport)) {
-                saveNode(recordGroup.getId(), entry);
+                NodeApi.saveNode(recordGroup.getId(), entry);
             }
 
         } else {
@@ -1323,32 +1218,6 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
 
     }
 
-    private Map<String, Integer> loadNodeIdCache(RecordGroup recordGroup) {
-        Map<String, Integer> cache = new HashMap<>();
-        if (!VALID_XML_ELEMENT_NAME.matcher(actaProConfig.getIdentifierFieldName()).matches()) {
-            log.error("Invalid actaProConfig.getIdentifierFieldName() '{}' - rejected to prevent injection", actaProConfig.getIdentifierFieldName());
-            return cache;
-        }
-        String sql = "SELECT id, ExtractValue(data, '/xml/" + actaProConfig.getIdentifierFieldName() + "') AS dockey "
-                + "FROM archive_record_node WHERE archive_record_group_id = ?";
-        ResultSetHandler<Void> handler = rs -> {
-            while (rs.next()) {
-                String key = rs.getString("dockey");
-                int id = rs.getInt("id");
-                if (StringUtils.isNotBlank(key)) {
-                    cache.put(key, id);
-                }
-            }
-            return null;
-        };
-        try (Connection connection = MySQLHelper.getInstance().getConnection()) {
-            new QueryRunner().query(connection, sql, handler, recordGroup.getId());
-        } catch (SQLException e) {
-            log.error("Error loading node ID cache: {}", e.getMessage(), e);
-        }
-        return cache;
-    }
-
     private void importDocumentFromXml(io.goobi.api.job.actapro.model.Document doc, RecordGroup recordGroup,
             String rootElementID, Map<String, io.goobi.api.job.actapro.model.Document> allDocuments,
             Map<String, Integer> nodeIdCache) {
@@ -1356,12 +1225,12 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
 
         Integer entryId = nodeIdCache.get(documentId);
         if (entryId != null) {
-            ExtendedEadEntry entry = loadExtendendEntry(entryId);
+            ExtendedEadEntry entry = NodeApi.loadExtendendEntry(entryId);
             NodeInitializer.initEadNodeWithMetadata(entry, actaProConfig.getConfig().getConfiguredFields());
             String fingerprintBefore = entry.getFingerprint();
 
             String parentNodeId = getParentDocKey(doc);
-            String docOrder = getDocOrder(doc);
+            String docOrder = NodeApi.getDocOrder(doc);
             if (parentNodeId != null && docOrder != null && entry.getParentId() != null) {
                 Integer parentEntryId = nodeIdCache.get(parentNodeId);
                 if (parentEntryId != null && parentEntryId.intValue() != entry.getParentId()) {
@@ -1371,13 +1240,13 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                     } catch (NumberFormatException e) {
                         log.error("Cannot parse Ref_DocOrder '{}': {}", docOrder, e.getMessage());
                     }
-                    saveNode(recordGroup.getId(), entry);
+                    NodeApi.saveNode(recordGroup.getId(), entry);
                 }
             }
 
             parseDocumentMetadata(doc, entry);
             if (!fingerprintBefore.equals(entry.getFingerprint())) {
-                saveNode(recordGroup.getId(), entry);
+                NodeApi.saveNode(recordGroup.getId(), entry);
             }
         } else {
             if (doc.getPath() == null) {
@@ -1412,121 +1281,10 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
         }
     }
 
-    private void saveNode(Integer id, ExtendedEadEntry entry) {
-
-        // get next free id
-        if (entry.getDatabaseId() == null) {
-            String nextIdSql = "SELECT max(id) +1 from archive_record_node";
-            try (Connection connection = MySQLHelper.getInstance().getConnection()) {
-                QueryRunner run = new QueryRunner();
-                int nextAutoIncrementDbID = run.query(connection, nextIdSql, MySQLHelper.resultSetToIntegerHandler);
-                // assign new ids to all entries without id
-                entry.setDatabaseId(nextAutoIncrementDbID++);
-
-            } catch (SQLException e) {
-                log.error(e);
-            }
-        }
-
-        String insertSql =
-                "INSERT INTO archive_record_node (id, uuid, archive_record_group_id, hierarchy, order_number, node_type, sequence, processtitle, parent_id,label, data) VALUES ";
-
-        StringBuilder values = new StringBuilder();
-
-        if (values.length() > 0) {
-            values.append(", ");
-        }
-
-        values.append("(");
-        values.append(entry.getDatabaseId());
-        values.append(", '");
-        values.append(entry.getId());
-        values.append("', ");
-        values.append(id);
-        values.append(", ");
-        values.append(entry.getHierarchy());
-        values.append(", ");
-        values.append(entry.getOrderNumber());
-        values.append(", '");
-        values.append(entry.getNodeType() == null ? "" : entry.getNodeType().getNodeName());
-        values.append("', '");
-        values.append(entry.getSequence());
-        if (entry.getGoobiProcessTitle() == null) {
-            values.append("', null, ");
-        } else {
-            values.append("', '");
-            values.append(entry.getGoobiProcessTitle());
-            values.append("', ");
-        }
-        values.append(entry.getParentId());
-        values.append(", ?, ? )");
-        String metadata = entry.getDataAsXml();
-
-        StringBuilder sql = new StringBuilder(insertSql);
-        sql.append(values.toString());
-        sql.append("ON DUPLICATE KEY UPDATE  uuid = VALUES(uuid), hierarchy = VALUES(hierarchy), order_number = VALUES(order_number), "
-                + "node_type =  VALUES(node_type), sequence = VALUES(sequence), processtitle = VALUES(processtitle), "
-                + "processtitle = VALUES(processtitle), parent_id = VALUES(parent_id), label = VALUES(label), data = VALUES(data)");
-        try (Connection connection = MySQLHelper.getInstance().getConnection()) {
-            QueryRunner run = new QueryRunner();
-            run.update(connection, sql.toString(), entry.getLabel(), metadata);
-        } catch (SQLException e) {
-            log.error(e);
-        }
-
-    }
-
-    private ExtendedEadEntry loadExtendendEntry(Integer entryId) {
-        StringBuilder sql = new StringBuilder();
-        sql.append("select * from archive_record_node WHERE id = ?");
-
-        try (Connection connection = MySQLHelper.getInstance().getConnection()) {
-            QueryRunner run = new QueryRunner();
-            return run.query(connection, sql.toString(), rresultSetToExtendedNodeHandler, entryId);
-        } catch (SQLException e) {
-            log.error(e);
-        }
-        return null;
-    }
-
-    private static void clearNode(IEadEntry entry) {
-        clearList(entry.getIdentityStatementAreaList());
-        clearList(entry.getContextAreaList());
-        clearList(entry.getContentAndStructureAreaAreaList());
-        clearList(entry.getAccessAndUseAreaList());
-        clearList(entry.getAlliedMaterialsAreaList());
-        clearList(entry.getNotesAreaList());
-        clearList(entry.getDescriptionControlAreaList());
-    }
-
-    private static void clearList(List<IMetadataField> list) {
-        for (IMetadataField f : list) {
-            f.setEadEntry(null);
-            f.getValues().clear();
-            if (f.isGroup() && f.getGroups() != null) {
-                f.getGroups().clear();
-            }
-        }
-        list.clear();
-    }
-
-    public SimpleEadEntry loadSimpleEntry(Integer id) {
-        StringBuilder sql = new StringBuilder();
-        sql.append("select * from archive_record_node WHERE id = ?");
-
-        try (Connection connection = MySQLHelper.getInstance().getConnection()) {
-            QueryRunner run = new QueryRunner();
-            return run.query(connection, sql.toString(), resultSetToNodeHandler, id);
-        } catch (SQLException e) {
-            log.error(e);
-        }
-        return null;
-    }
-
     private Integer createNodeForDocument(io.goobi.api.job.actapro.model.Document doc, Integer parentDbId, RecordGroup recordGroup,
             Map<String, Integer> nodeIdCache) {
         int orderNumber = 0;
-        String orderStr = getDocOrder(doc);
+        String orderStr = NodeApi.getDocOrder(doc);
         if (orderStr != null) {
             try {
                 orderNumber = Integer.parseInt(orderStr);
@@ -1535,7 +1293,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
             }
         }
 
-        SimpleEadEntry parent = loadSimpleEntry(parentDbId);
+        SimpleEadEntry parent = NodeApi.loadSimpleEntry(parentDbId);
         ExtendedEadEntry entry = new ExtendedEadEntry(orderNumber, parent.getHierarchy() + 1);
         entry.setParentId(parent.getId());
         if (StringUtils.isBlank(parent.getSequence())) {
@@ -1567,86 +1325,12 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
         parseDocumentMetadata(doc, entry);
         entry.setNodeType(actaProConfig.getNodes().get(doc.getType()));
         entry.calculateFingerprint();
-        saveNode(recordGroup.getId(), entry);
+        NodeApi.saveNode(recordGroup.getId(), entry);
         if (nodeIdCache != null && doc.getDocKey() != null) {
             nodeIdCache.put(doc.getDocKey(), entry.getDatabaseId());
         }
         return entry.getDatabaseId();
     }
-
-    private final ResultSetHandler<ExtendedEadEntry> rresultSetToExtendedNodeHandler = new ResultSetHandler<>() {
-        @Override
-        public ExtendedEadEntry handle(ResultSet rs) throws SQLException {
-
-            if (rs.next()) {
-
-                int id = rs.getInt("id");
-                String uuid = rs.getString("uuid");
-
-                int hierarchy = rs.getInt("hierarchy");
-                int orderNumber = rs.getInt("order_number");
-                String nodeTypeName = rs.getString("node_type");
-                String sequence = rs.getString("sequence");
-                String processtitle = rs.getString("processtitle");
-                Integer parentId = rs.getInt("parent_id");
-                if (rs.wasNull()) {
-                    parentId = null;
-                }
-                String label = rs.getString("label");
-
-                String data = rs.getString("data");
-
-                ExtendedEadEntry currentEntry = new ExtendedEadEntry(orderNumber, hierarchy);
-                currentEntry.setParentId(parentId);
-                currentEntry.setDatabaseId(id);
-                currentEntry.setId(uuid);
-                currentEntry.setNodeTypeName(nodeTypeName);
-
-                currentEntry.setSequence(sequence);
-                currentEntry.setGoobiProcessTitle(processtitle);
-                currentEntry.setLabel(label);
-                currentEntry.setData(data);
-
-                return currentEntry;
-            }
-
-            return null;
-        }
-    };
-
-    private final ResultSetHandler<SimpleEadEntry> resultSetToNodeHandler = new ResultSetHandler<>() {
-        @Override
-        public SimpleEadEntry handle(ResultSet rs) throws SQLException {
-            if (rs.next()) {
-
-                int id = rs.getInt("id");
-                String uuid = rs.getString("uuid");
-
-                int hierarchy = rs.getInt("hierarchy");
-                int orderNumber = rs.getInt("order_number");
-                String sequence = rs.getString("sequence");
-                Integer parentId = rs.getInt("parent_id");
-                if (rs.wasNull()) {
-                    parentId = null;
-                }
-
-                SimpleEadEntry currentEntry = new SimpleEadEntry();
-
-                currentEntry.setId(id);
-                currentEntry.setUuid(uuid);
-                currentEntry.setSequence(sequence);
-                currentEntry.setHierarchy(hierarchy);
-                currentEntry.setOrder(orderNumber);
-                currentEntry.setParentId(parentId);
-
-                currentEntry.setSequence(sequence);
-
-                return currentEntry;
-
-            }
-            return null;
-        }
-    };
 
     @PreDestroy
     public void shutdown() {

@@ -15,6 +15,7 @@ import org.junit.Test;
 
 import io.goobi.api.job.actapro.model.Document;
 import io.goobi.api.job.actapro.model.DocumentField;
+import io.goobi.api.job.actapro.model.NodeApi;
 
 public class ActaproSyncPluginTest {
 
@@ -54,14 +55,19 @@ public class ActaproSyncPluginTest {
         Map<String, Document> docs = ActaProSyncAdministrationPlugin.parseXmlDocumentSet(xmlFile);
         Document tekt = docs.get("Tekt    test-tekt-001");
         assertNotNull(tekt);
-        DocumentField refGp = tekt.getBlock().getFields().stream()
+        DocumentField refGp = tekt.getBlock()
+                .getFields()
+                .stream()
                 .filter(f -> "Ref_Gp".equals(f.getType()))
-                .findFirst().orElse(null);
+                .findFirst()
+                .orElse(null);
         assertNotNull(refGp);
         assertEquals(4, refGp.getFields().size());
-        DocumentField refDocKey = refGp.getFields().stream()
+        DocumentField refDocKey = refGp.getFields()
+                .stream()
                 .filter(f -> "Ref_DocKey".equals(f.getType()))
-                .findFirst().orElse(null);
+                .findFirst()
+                .orElse(null);
         assertNotNull(refDocKey);
         assertEquals("Arch    test-arch-001", refDocKey.getValue());
     }
@@ -71,9 +77,12 @@ public class ActaproSyncPluginTest {
         Path xmlFile = Paths.get(resourcesFolder + "test-documents.xml");
         Map<String, Document> docs = ActaProSyncAdministrationPlugin.parseXmlDocumentSet(xmlFile);
         Document tekt = docs.get("Tekt    test-tekt-001");
-        DocumentField laufzeit = tekt.getBlock().getFields().stream()
+        DocumentField laufzeit = tekt.getBlock()
+                .getFields()
+                .stream()
                 .filter(f -> "Laufzeit".equals(f.getType()))
-                .findFirst().orElse(null);
+                .findFirst()
+                .orElse(null);
         assertNotNull(laufzeit);
         assertEquals("1900-2000", laufzeit.getValue());
         assertEquals("Laufzeit 1900-2000", laufzeit.getPlainValue());
@@ -101,7 +110,7 @@ public class ActaproSyncPluginTest {
         Path xmlFile = Paths.get(resourcesFolder + "test-documents.xml");
         Map<String, Document> docs = ActaProSyncAdministrationPlugin.parseXmlDocumentSet(xmlFile);
         Document tekt = docs.get("Tekt    test-tekt-001");
-        assertEquals("1", ActaProSyncAdministrationPlugin.getDocOrder(tekt));
+        assertEquals("1", NodeApi.getDocOrder(tekt));
     }
 
     @Test
