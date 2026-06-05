@@ -32,10 +32,6 @@ import java.util.stream.Stream;
 
 import org.apache.commons.collections4.queue.CircularFifoQueue;
 import org.apache.commons.configuration.ConfigurationException;
-import org.apache.commons.configuration.HierarchicalConfiguration;
-import org.apache.commons.configuration.XMLConfiguration;
-import org.apache.commons.configuration.reloading.FileChangedReloadingStrategy;
-import org.apache.commons.configuration.tree.xpath.XPathExpressionEngine;
 import org.apache.commons.dbutils.QueryRunner;
 import org.apache.commons.dbutils.ResultSetHandler;
 import org.apache.commons.lang3.StringUtils;
@@ -55,16 +51,15 @@ import org.jdom2.Namespace;
 import org.jdom2.input.SAXBuilder;
 import org.omnifaces.cdi.PushContext;
 
-import de.intranda.goobi.plugins.model.ArchiveManagementConfiguration;
 import de.intranda.goobi.plugins.model.RecordGroup;
 import de.intranda.goobi.plugins.persistence.ArchiveManagementManager;
 import de.intranda.goobi.plugins.persistence.NodeInitializer;
-import de.sub.goobi.config.ConfigurationHelper;
 import de.sub.goobi.helper.Helper;
 import de.sub.goobi.helper.exceptions.SwapException;
 import de.sub.goobi.persistence.managers.MySQLHelper;
 import de.sub.goobi.persistence.managers.ProcessManager;
 import io.goobi.api.job.actapro.model.ActaProApi;
+import io.goobi.api.job.actapro.model.ActaProApiConfiguration;
 import io.goobi.api.job.actapro.model.AuthenticationToken;
 import io.goobi.api.job.actapro.model.Document;
 import io.goobi.api.job.actapro.model.DocumentBlock;
@@ -123,32 +118,11 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
     private LocalDate endDate;
 
     @Getter
-    private List<String> configuredInventories;
-
-    @Getter
     @Setter
     private String database;
 
-    // authentication
-    private String authServiceUrl;
-    private String authServiceHeader;
-    private String authServiceUsername;
-    private String authServicePassword;
-
-    private String connectorUrl;
-
-    private String identifierFieldName;
-
-    private String documentOwner;
-
     @Getter
-    private transient ArchiveManagementConfiguration config;
-
-    private transient XMLConfiguration actaProConfig;
-
-    private transient List<MetadataMapping> metadataFields;
-
-    private transient Map<String, INodeType> nodes;
+    private ActaProApiConfiguration actaProConfig;
 
     private DateTimeFormatter documentDateFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss:SSS");
 
@@ -165,12 +139,6 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
 
-    @Getter
-    private boolean enableXmlImport = false;
-    private String xmlImportFolder;
-
-    private String xmlTectonicsFile;
-
     public ActaProSyncAdministrationPlugin() {
         log.trace("initialize plugin");
         try {
@@ -183,77 +151,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
     private void readConfiguration() throws ConfigurationException {
         updateLog("Start reading the configuration");
 
-        try {
-            config = new ArchiveManagementConfiguration();
-            config.readConfiguration("");
-        } catch (ConfigurationException e) {
-            log.error(e);
-        }
-
-        actaProConfig = new XMLConfiguration(
-                ConfigurationHelper.getInstance().getConfigurationFolder() + "plugin_intranda_administration_actapro_sync.xml");
-        actaProConfig.setListDelimiter('&');
-        actaProConfig.setReloadingStrategy(new FileChangedReloadingStrategy());
-        actaProConfig.setExpressionEngine(new XPathExpressionEngine());
-
-        configuredInventories = new ArrayList<>();
-
-        List<HierarchicalConfiguration> hcl = actaProConfig.configurationsAt("/inventory");
-
-        for (HierarchicalConfiguration hc : hcl) {
-            configuredInventories.add(hc.getString("@archiveName"));
-        }
-
-        authServiceUrl = actaProConfig.getString("/authentication/authServiceUrl");
-        authServiceHeader = actaProConfig.getString("/authentication/authServiceHeader");
-        authServiceUsername = actaProConfig.getString("/authentication/authServiceUsername");
-        authServicePassword = actaProConfig.getString("/authentication/authServicePassword");
-        connectorUrl = actaProConfig.getString("/connectorUrl");
-
-        identifierFieldName = actaProConfig.getString("/eadIdField");
-
-        documentOwner = actaProConfig.getString("/documentOwner", "ACTAPRO");
-
-        metadataFields = new ArrayList<>();
-
-        List<HierarchicalConfiguration> mapping = actaProConfig.configurationsAt("/metadata/field");
-        for (HierarchicalConfiguration c : mapping) {
-            MetadataMapping mm = new MetadataMapping(c.getString("@type"), c.getString("@groupType", ""), c.getString("@eadField"),
-                    c.getString("@eadGroup", ""), c.getString("@eadArea"));
-            metadataFields.add(mm);
-        }
-
-        nodes = new HashMap<>();
-        List<HierarchicalConfiguration> nodeTypes = actaProConfig.configurationsAt("/nodeTypes/type");
-
-        INodeType defaultType = null;
-        for (INodeType nodeType : config.getConfiguredNodes()) {
-            if ("folder".equals(nodeType.getNodeName())) {
-                defaultType = nodeType;
-            }
-        }
-
-        for (HierarchicalConfiguration c : nodeTypes) {
-            String actaProType = c.getString("@actaPro");
-            String nodeType = c.getString("@node");
-            INodeType type = null;
-            for (INodeType nt : config.getConfiguredNodes()) {
-                if (nt.getNodeName().equals(nodeType)) {
-                    type = nt;
-                }
-            }
-            if (type != null) {
-                // use configured type
-                nodes.put(actaProType, type);
-            } else {
-                // or default type
-                nodes.put(actaProType, defaultType);
-            }
-        }
-
-        enableXmlImport = actaProConfig.getBoolean("/xml/@enabled");
-        xmlImportFolder = actaProConfig.getString("/xml/importFolder");
-        xmlTectonicsFile = actaProConfig.getString("/xml/tectonicsFile");
+        actaProConfig = new ActaProApiConfiguration();
 
         updateLog("Configuration successfully read");
 
@@ -272,7 +170,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
             return;
         }
 
-        String rootElementID = actaProConfig.getString("/inventory[@archiveName='" + databaseName + "']/@actaproId");
+        String rootElementID = actaProConfig.getRootId(databaseName);
         updateLog("Start XML import for inventory " + databaseName);
         updateLog("Root element ID: " + rootElementID);
 
@@ -289,9 +187,9 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                 }
                 updateLog("Archive database loaded.");
 
-                Path importDir = Paths.get(xmlImportFolder);
+                Path importDir = Paths.get(actaProConfig.getXmlImportFolder());
                 if (!Files.isDirectory(importDir)) {
-                    updateLog("No XML files found in " + xmlImportFolder);
+                    updateLog("No XML files found in " + actaProConfig.getXmlImportFolder());
                     run.set(false);
                     return;
                 }
@@ -302,21 +200,21 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                             .collect(Collectors.toList());
                 }
                 if (allXmlPaths.isEmpty()) {
-                    updateLog("No XML files found in " + xmlImportFolder);
+                    updateLog("No XML files found in " + actaProConfig.getXmlImportFolder());
                     run.set(false);
                     return;
                 }
 
                 List<Path> xmlFiles = new ArrayList<>();
-                if (StringUtils.isNotBlank(xmlTectonicsFile)) {
-                    Path tectonicsFile = importDir.resolve(xmlTectonicsFile);
+                if (StringUtils.isNotBlank(actaProConfig.getXmlTectonicsFile())) {
+                    Path tectonicsFile = importDir.resolve(actaProConfig.getXmlTectonicsFile());
                     if (Files.exists(tectonicsFile)) {
                         xmlFiles.add(tectonicsFile);
-                        updateLog("Added tectonics file: " + xmlTectonicsFile);
+                        updateLog("Added tectonics file: " + actaProConfig.getXmlTectonicsFile());
                     }
                 }
                 for (Path p : allXmlPaths) {
-                    if (!p.getFileName().toString().equals(xmlTectonicsFile)) {
+                    if (!p.getFileName().toString().equals(actaProConfig.getXmlTectonicsFile())) {
                         xmlFiles.add(p);
                     }
                 }
@@ -517,7 +415,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
 
             return;
         }
-        String rootElementID = actaProConfig.getString("/inventory[@archiveName='" + database + "']/@actaproId");
+        String rootElementID = actaProConfig.getRootId(database);
 
         // check if database exist, load it
 
@@ -539,12 +437,13 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                 updateLog("Node ID cache loaded: " + nodeIdCache.size() + " existing entries.");
                 try (Client client = ClientBuilder.newClient()) {
                     updateLog("Try to authenticate.");
-                    AuthenticationToken token = ActaProApi.authenticate(client, authServiceHeader, authServiceUrl, authServiceUsername,
-                            authServicePassword);
+                    AuthenticationToken token = ActaProApi.authenticate(client, actaProConfig.getAuthServiceHeader(),
+                            actaProConfig.getAuthServiceUrl(), actaProConfig.getAuthServiceUsername(),
+                            actaProConfig.getAuthServicePassword());
                     updateLog("Authenticated.");
                     Document doc = null;
                     try {
-                        doc = ActaProApi.getDocumentByKey(client, token, connectorUrl, rootElementID);
+                        doc = ActaProApi.getDocumentByKey(client, token, actaProConfig.getConnectorUrl(), rootElementID);
                     } catch (IOException e) {
                         log.error(e);
                         updateLog("API connection error, abort.");
@@ -583,7 +482,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
 
             DocumentField matchedField = null;
             // first check, if field name is used in a group // has sub fields
-            for (MetadataMapping mm : metadataFields) {
+            for (MetadataMapping mm : actaProConfig.getMetadataFields()) {
                 if (mm.getJsonGroupType().equals(fieldType)) {
                     for (DocumentField subfield : field.getFields()) {
                         String subType = subfield.getType();
@@ -682,19 +581,20 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
 
                 try (Client client = ClientBuilder.newClient()) {
                     updateLog("Try to authenticate.");
-                    AuthenticationToken token = ActaProApi.authenticate(client, authServiceHeader, authServiceUrl, authServiceUsername,
-                            authServicePassword);
+                    AuthenticationToken token =
+                            ActaProApi.authenticate(client, actaProConfig.getAuthServiceHeader(), actaProConfig.getAuthServiceUrl(),
+                                    actaProConfig.getAuthServiceUsername(), actaProConfig.getAuthServicePassword());
                     updateLog("Authenticated.");
 
                     for (IEadEntry entry : allNodes) {
 
                         try {
-                            NodeInitializer.initEadNodeWithMetadata(entry, getConfig().getConfiguredFields());
+                            NodeInitializer.initEadNodeWithMetadata(entry, actaProConfig.getConfig().getConfiguredFields());
                             updateLog("Node with id '" + entry.getId() + "' loaded.");
                             // check if id field exists
                             String nodeId = null;
                             for (IMetadataField emf : entry.getIdentityStatementAreaList()) {
-                                if (emf.getName().equals(identifierFieldName)) {
+                                if (emf.getName().equals(actaProConfig.getIdentifierFieldName())) {
                                     nodeId = emf.getValues().get(0).getValue();
                                 }
                             }
@@ -704,7 +604,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                                 // if yes -> find document
                                 Document doc = null;
                                 try {
-                                    doc = ActaProApi.getDocumentByKey(client, token, connectorUrl, nodeId);
+                                    doc = ActaProApi.getDocumentByKey(client, token, actaProConfig.getConnectorUrl(), nodeId);
                                 } catch (IOException e) {
                                     log.error(e);
                                 }
@@ -725,7 +625,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                                 if (writeMetadata(entry, doc)) {
 
                                     // update document
-                                    ActaProApi.updateDocument(client, token, connectorUrl, doc);
+                                    ActaProApi.updateDocument(client, token, actaProConfig.getConnectorUrl(), doc);
                                 }
 
                             } else if (entry.getParentNode() != null) {
@@ -736,7 +636,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                                 doc.setObject("document");
 
                                 // set  node type
-                                for (Entry<String, INodeType> e : nodes.entrySet()) {
+                                for (Entry<String, INodeType> e : actaProConfig.getNodes().entrySet()) {
                                     if (e.getValue().getNodeName().equals(entry.getNodeType().getNodeName())) {
                                         doc.setType(e.getKey());
                                     }
@@ -756,9 +656,9 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                                 String parentDocKey = null;
                                 IEadEntry parent = entry.getParentNode();
                                 try {
-                                    NodeInitializer.initEadNodeWithMetadata(parent, getConfig().getConfiguredFields());
+                                    NodeInitializer.initEadNodeWithMetadata(parent, actaProConfig.getConfig().getConfiguredFields());
                                     for (IMetadataField emf : parent.getIdentityStatementAreaList()) {
-                                        if (emf.getName().equals(identifierFieldName)) {
+                                        if (emf.getName().equals(actaProConfig.getIdentifierFieldName())) {
                                             parentDocKey = emf.getValues().get(0).getValue();
                                         }
                                     }
@@ -775,7 +675,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                                     refDocOrderField.setValue(String.valueOf(entry.getOrderNumber()));
                                     block.addFieldsItem(refDocOrderField);
 
-                                    for (Entry<String, INodeType> e : nodes.entrySet()) {
+                                    for (Entry<String, INodeType> e : actaProConfig.getNodes().entrySet()) {
                                         if (e.getValue().getNodeName().equals(entry.getNodeType().getNodeName())) {
                                             DocumentField refDocTypeField = new DocumentField();
                                             refDocTypeField.setType("Ref_Doctype");
@@ -789,20 +689,20 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
 
                                     // create required fields:
 
-                                    doc.setOwnerId(documentOwner);
-                                    doc.setCreatorID(documentOwner);
+                                    doc.setOwnerId(actaProConfig.getDocumentOwner());
+                                    doc.setCreatorID(actaProConfig.getDocumentOwner());
                                     doc.setCreationDate(documentDateFormatter.format(LocalDateTime.now()));
                                     doc.setChangeDate(documentDateFormatter.format(LocalDateTime.now()));
 
                                     // insert as new doc
-                                    doc = ActaProApi.createDocument(client, token, connectorUrl, parentDocKey, doc);
+                                    doc = ActaProApi.createDocument(client, token, actaProConfig.getConnectorUrl(), parentDocKey, doc);
                                     // If doc is null, the upload  has failed, probably because the document is temporarily locked or there is a conflict.
                                     if (doc != null) {
                                         // get id from response document
                                         String newDocumentKey = doc.getDocKey();
                                         // save generated id
                                         for (IMetadataField emf : entry.getIdentityStatementAreaList()) {
-                                            if (emf.getName().equals(identifierFieldName)) {
+                                            if (emf.getName().equals(actaProConfig.getIdentifierFieldName())) {
                                                 emf.getValues().get(0).setValue(newDocumentKey);
                                                 // if process exists, write newDocumentKey to metadata
                                                 if (StringUtils.isNotBlank(entry.getGoobiProcessTitle())) {
@@ -880,7 +780,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
         boolean metadataChanged = false;
 
         // for each configured field
-        for (MetadataMapping mm : metadataFields) {
+        for (MetadataMapping mm : actaProConfig.getMetadataFields()) {
             // find node metadata
             String value = getNodeMetadataVaue(mm, entry);
 
@@ -1027,17 +927,17 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
 
         // ignore root element
         if (StringUtils.isNotBlank(parentNodeId) && entry.getParentNode() != null) {
-            Integer parentEntryId = ArchiveManagementManager.findNodeById(identifierFieldName, parentNodeId);
+            Integer parentEntryId = ArchiveManagementManager.findNodeById(actaProConfig.getIdentifierFieldName(), parentNodeId);
 
             if (parentEntryId.intValue() != entry.getParentNode().getDatabaseId()) {
                 // parent node was changed
                 IEadEntry parent = entry.getParentNode();
                 // update Ref_DocKey, Ref_DocOrder fields
                 try {
-                    NodeInitializer.initEadNodeWithMetadata(parent, getConfig().getConfiguredFields());
+                    NodeInitializer.initEadNodeWithMetadata(parent, actaProConfig.getConfig().getConfiguredFields());
                     String newParentNodeId = null;
                     for (IMetadataField emf : parent.getIdentityStatementAreaList()) {
-                        if (emf.getName().equals(identifierFieldName)) {
+                        if (emf.getName().equals(actaProConfig.getIdentifierFieldName())) {
                             newParentNodeId = emf.getValues().get(0).getValue();
                         }
                     }
@@ -1047,7 +947,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                         } else if ("Ref_DocOrder".equals(df.getType())) {
                             df.setValue(String.valueOf(entry.getOrderNumber()));
                         } else if ("Ref_Doctype".equals(df.getType())) {
-                            for (Entry<String, INodeType> e : nodes.entrySet()) {
+                            for (Entry<String, INodeType> e : actaProConfig.getNodes().entrySet()) {
                                 if (e.getValue().getNodeName().equals(entry.getNodeType().getNodeName())) {
                                     df.setValue(e.getKey());
                                 }
@@ -1074,8 +974,9 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
             if (token != null && token.getExpiresIn() > 0
                     && Instant.now().isAfter(tokenObtainedAt.plusSeconds(token.getExpiresIn() - 60))) {
                 log.info("Token about to expire, renewing proactively");
-                token = ActaProApi.authenticate(client, authServiceHeader, authServiceUrl, authServiceUsername,
-                        authServicePassword);
+                token = ActaProApi.authenticate(client, actaProConfig.getAuthServiceHeader(), actaProConfig.getAuthServiceUrl(),
+                        actaProConfig.getAuthServiceUsername(),
+                        actaProConfig.getAuthServicePassword());
                 tokenObtainedAt = Instant.now();
             }
 
@@ -1085,8 +986,8 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                 toProcess.addAll(children);
             } catch (UnauthorizedException e) {
                 log.warn("Token expired while processing '{}', re-authenticating and retrying", current);
-                token = ActaProApi.authenticate(client, authServiceHeader, authServiceUrl, authServiceUsername,
-                        authServicePassword);
+                token = ActaProApi.authenticate(client, actaProConfig.getAuthServiceHeader(), actaProConfig.getAuthServiceUrl(),
+                        actaProConfig.getAuthServiceUsername(), actaProConfig.getAuthServicePassword());
                 tokenObtainedAt = Instant.now();
                 if (token != null) {
                     toProcess.add(current);
@@ -1113,7 +1014,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
 
             return;
         }
-        String rootElementID = actaProConfig.getString("/inventory[@archiveName='" + database + "']/@actaproId");
+        String rootElementID = actaProConfig.getRootId(database);
         // check if database exist, load it
         updateLog("Start import for inventory " + databaseName);
         updateLog("ACTApro root element is " + rootElementID);
@@ -1133,8 +1034,9 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                 updateLog("Node ID cache loaded: " + nodeIdCache.size() + " existing entries.");
                 try (Client client = ClientBuilder.newClient()) {
                     updateLog("Try to authenticate.");
-                    AuthenticationToken token = ActaProApi.authenticate(client, authServiceHeader, authServiceUrl, authServiceUsername,
-                            authServicePassword);
+                    AuthenticationToken token = ActaProApi.authenticate(client, actaProConfig.getAuthServiceHeader(),
+                            actaProConfig.getAuthServiceUrl(), actaProConfig.getAuthServiceUsername(),
+                            actaProConfig.getAuthServicePassword());
                     updateLog("Authenticated.");
 
                     // TODO call it for each day between start and end
@@ -1207,7 +1109,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
         boolean isLast = false;
         int currentPage = 0;
         while (!isLast) {
-            WebTarget target = client.target(connectorUrl).path("documents").queryParam("page", currentPage);
+            WebTarget target = client.target(actaProConfig.getConnectorUrl()).path("documents").queryParam("page", currentPage);
             Invocation.Builder builder = target.request();
             builder.header("Accept", "application/json");
             builder.header("Authorization", "Bearer " + token.getAccessToken());
@@ -1224,7 +1126,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                             String id = content.get("id");
                             Document doc = null;
                             try {
-                                doc = ActaProApi.getDocumentByKey(client, token, connectorUrl, id);
+                                doc = ActaProApi.getDocumentByKey(client, token, actaProConfig.getConnectorUrl(), id);
                             } catch (UnauthorizedException e) {
                                 throw e;
                             } catch (Exception e) {
@@ -1344,7 +1246,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
 
             ExtendedEadEntry entry = loadExtendendEntry(entryId);
 
-            NodeInitializer.initEadNodeWithMetadata(entry, getConfig().getConfiguredFields());
+            NodeInitializer.initEadNodeWithMetadata(entry, actaProConfig.getConfig().getConfiguredFields());
             String fingerprintBeforeImport = entry.getFingerprint();
 
             // check if document still have the same parent node
@@ -1401,7 +1303,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
 
                             Document currentDoc = null;
                             try {
-                                currentDoc = ActaProApi.getDocumentByKey(client, token, connectorUrl, path);
+                                currentDoc = ActaProApi.getDocumentByKey(client, token, actaProConfig.getConnectorUrl(), path);
                             } catch (UnauthorizedException e1) {
                                 throw e1;
                             } catch (Exception e1) {
@@ -1423,11 +1325,11 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
 
     private Map<String, Integer> loadNodeIdCache(RecordGroup recordGroup) {
         Map<String, Integer> cache = new HashMap<>();
-        if (!VALID_XML_ELEMENT_NAME.matcher(identifierFieldName).matches()) {
-            log.error("Invalid identifierFieldName '{}' - rejected to prevent injection", identifierFieldName);
+        if (!VALID_XML_ELEMENT_NAME.matcher(actaProConfig.getIdentifierFieldName()).matches()) {
+            log.error("Invalid actaProConfig.getIdentifierFieldName() '{}' - rejected to prevent injection", actaProConfig.getIdentifierFieldName());
             return cache;
         }
-        String sql = "SELECT id, ExtractValue(data, '/xml/" + identifierFieldName + "') AS dockey "
+        String sql = "SELECT id, ExtractValue(data, '/xml/" + actaProConfig.getIdentifierFieldName() + "') AS dockey "
                 + "FROM archive_record_node WHERE archive_record_group_id = ?";
         ResultSetHandler<Void> handler = rs -> {
             while (rs.next()) {
@@ -1455,7 +1357,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
         Integer entryId = nodeIdCache.get(documentId);
         if (entryId != null) {
             ExtendedEadEntry entry = loadExtendendEntry(entryId);
-            NodeInitializer.initEadNodeWithMetadata(entry, getConfig().getConfiguredFields());
+            NodeInitializer.initEadNodeWithMetadata(entry, actaProConfig.getConfig().getConfiguredFields());
             String fingerprintBefore = entry.getFingerprint();
 
             String parentNodeId = getParentDocKey(doc);
@@ -1644,7 +1546,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
         entry.setId("id_" + UUID.randomUUID());
         entry.setLabel(doc.getDocTitle());
 
-        for (IMetadataField emf : config.getConfiguredFields()) {
+        for (IMetadataField emf : actaProConfig.getConfig().getConfiguredFields()) {
             if (emf.isGroup()) {
                 NodeInitializer.loadGroupMetadata(entry, emf, null);
             } else if ("unittitle".equals(emf.getName())) {
@@ -1652,7 +1554,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                 titleData.add(new ExtendendValue(null, doc.getDocTitle(), null, null));
                 IMetadataField toAdd = NodeInitializer.addFieldToEntry(entry, emf, titleData);
                 NodeInitializer.addFieldToNode(entry, toAdd);
-            } else if (emf.getName().equals(identifierFieldName)) {
+            } else if (emf.getName().equals(actaProConfig.getIdentifierFieldName())) {
                 List<IValue> idData = new ArrayList<>();
                 idData.add(new ExtendendValue(null, doc.getDocKey(), null, null));
                 IMetadataField toAdd = NodeInitializer.addFieldToEntry(entry, emf, idData);
@@ -1663,7 +1565,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
             }
         }
         parseDocumentMetadata(doc, entry);
-        entry.setNodeType(nodes.get(doc.getType()));
+        entry.setNodeType(actaProConfig.getNodes().get(doc.getType()));
         entry.calculateFingerprint();
         saveNode(recordGroup.getId(), entry);
         if (nodeIdCache != null && doc.getDocKey() != null) {
@@ -1750,12 +1652,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
     public void shutdown() {
         executor.shutdown();
         pusher = null;
-        if (actaProConfig != null) {
-            actaProConfig.setReloadingStrategy(null);
-            actaProConfig.clear();
-        }
-        metadataFields = null;
-        nodes = null;
-        config = null;
+        actaProConfig = null;
+
     }
 }
