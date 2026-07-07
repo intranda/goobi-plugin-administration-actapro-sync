@@ -1,4 +1,4 @@
-package io.goobi.api.job;
+package io.goobi.job;
 
 import java.io.IOException;
 import java.time.Duration;

@@ -34,7 +34,7 @@
 
 
             <h:form
-                rendered="#{LoginForm.hasRole('Plugin_administration_arche_project_export')}"
+                rendered="#{LoginForm.hasRole('Plugin_administration_actapro_sync')}"
                 id="actionForm"
                 enctype="multipart/form-data">
                 <intranda:formInputDropDown
@@ -43,7 +43,7 @@
                     field="#{AdministrationForm.administrationPlugin.database}"
                     help="#{msgs.name}"
                     name="inventory"
-                    selectItems="#{AdministrationForm.administrationPlugin.configuredInventories}"
+                    selectItems="#{AdministrationForm.administrationPlugin.actaProConfig.configuredInventories}"
                     required="true"
                     var="var"
                     hidePleaseSelectMessage="false" />
@@ -93,7 +93,7 @@
                 
                 
                     <button
-                        jsf:rendered="#{AdministrationForm.administrationPlugin.enableXmlImport}"
+                        jsf:rendered="#{AdministrationForm.administrationPlugin.actaProConfig.enableXmlImport}"
                         jsf:action="#{AdministrationForm.administrationPlugin.xmlImport}"
                         aria-label="#{msgs.plugin_administration_xmlImport}"
                         title="#{msgs.XmlImport}"
@@ -105,7 +105,7 @@
                     </button>
                 
                       <button
-                        jsf:rendered="#{AdministrationForm.administrationPlugin.enableXmlImport}"
+                        jsf:rendered="#{AdministrationForm.administrationPlugin.actaProConfig.enableXmlImport}"
                         jsf:action="#{AdministrationForm.administrationPlugin.partialUpdate}"
                         aria-label="#{msgs.partialUpdate}"
                         title="#{msgs.partialUpdate}"
