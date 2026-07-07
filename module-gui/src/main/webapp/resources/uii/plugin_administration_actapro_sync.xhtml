@@ -10,7 +10,8 @@
     xmlns:button="http://goobi.io/button"
     xmlns:jsf="http://xmlns.jcp.org/jsf"
     xmlns:o="http://omnifaces.org/ui"
-    xmlns:section="http://goobi.io/section">
+    xmlns:section="http://goobi.io/section"
+    xmlns:util="http://goobi.io/util">
 
     <h:panelGroup
         rendered="#{!LoginForm.hasRole('Plugin_administration_actapro_sync')}"
@@ -27,7 +28,7 @@
             boxForm="true"
             boxPadding="false"
             boxType="primary"
-            icon="fa fa-plug"
+            icon="plug"
             id="selectionBox"
             title="#{msgs[AdministrationForm.administrationPlugin.title]}"
             boxClass="mb-3">
@@ -89,42 +90,33 @@
 
 
                 <div class="form-actions">
-                
-                
-                
+
+
+
                     <button
                         jsf:rendered="#{AdministrationForm.administrationPlugin.enableXmlImport}"
                         jsf:action="#{AdministrationForm.administrationPlugin.xmlImport}"
                         aria-label="#{msgs.plugin_administration_xmlImport}"
                         title="#{msgs.XmlImport}"
                         class="btn btn-blank">
-                        <span
-                            class="fa fa-download me-2"
-                            aria-hidden="true"></span>
-                        <h:outputText value="#{msgs.XmlImport}" />
+                        <util:icon-text icon="download" text="#{msgs.XmlImport}" />
                     </button>
-                
+
                       <button
                         jsf:rendered="#{AdministrationForm.administrationPlugin.enableXmlImport}"
                         jsf:action="#{AdministrationForm.administrationPlugin.partialUpdate}"
                         aria-label="#{msgs.partialUpdate}"
                         title="#{msgs.partialUpdate}"
                         class="btn btn-blank">
-                        <span
-                            class="fa fa-download me-2"
-                            aria-hidden="true"></span>
-                        <h:outputText value="#{msgs.partialUpdate}" />
+                        <util:icon-text icon="download" text="#{msgs.partialUpdate}" />
                     </button>
-                    
+
                     <button
                         jsf:action="#{AdministrationForm.administrationPlugin.downloadFromActaPro}"
                         aria-label="#{msgs.plugin_administration_downloadFromActaPro}"
                         title="#{msgs.plugin_administration_downloadFromActaPro}"
                         class="btn btn-blank">
-                        <span
-                            class="fa fa-download me-2"
-                            aria-hidden="true"></span>
-                        <h:outputText value="#{msgs.plugin_administration_downloadFromActaPro}" />
+                        <util:icon-text icon="download" text="#{msgs.plugin_administration_downloadFromActaPro}" />
                     </button>
 
                     <button
@@ -132,10 +124,7 @@
                         aria-label="#{msgs.plugin_administration_uploadToActaPro}"
                         title="#{msgs.plugin_administration_uploadToActaPro}"
                         class="btn btn-blank">
-                        <span
-                            class="fa fa-upload me-2"
-                            aria-hidden="true"></span>
-                        <h:outputText value="#{msgs.plugin_administration_uploadToActaPro}" />
+                        <util:icon-text icon="upload" text="#{msgs.plugin_administration_uploadToActaPro}" />
                     </button>
                 </div>
 
