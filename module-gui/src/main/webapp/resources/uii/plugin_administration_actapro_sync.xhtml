@@ -13,16 +13,7 @@
     xmlns:section="http://goobi.io/section"
     xmlns:util="http://goobi.io/util">
 
-    <h:panelGroup
-        rendered="#{!LoginForm.hasRole('Plugin_administration_actapro_sync')}"
-        styleClass="color-box bg-hot text-white d-flex flex-row p-3">
-        <h:outputText
-            styleClass="fw-bold"
-            value="#{msgs.plugin_administration_missingPermission} Plugin_administration_actapro_sync" />
-    </h:panelGroup>
-
-    <h:panelGroup rendered="#{LoginForm.hasRole('Plugin_administration_actapro_sync')}">
-
+    <util:missing-rights rights="Plugin_administration_actapro_sync">
 
         <intranda:box
             boxForm="true"
@@ -102,7 +93,7 @@
                         <util:icon-text icon="download" text="#{msgs.XmlImport}" />
                     </button>
 
-                      <button
+                    <button
                         jsf:rendered="#{AdministrationForm.administrationPlugin.enableXmlImport}"
                         jsf:action="#{AdministrationForm.administrationPlugin.partialUpdate}"
                         aria-label="#{msgs.partialUpdate}"
@@ -163,5 +154,5 @@
                 render="logs" />
         </o:socket>
         <!-- // websocket communication -->
-    </h:panelGroup>
+    </util:missing-rights>
 </ui:composition>
