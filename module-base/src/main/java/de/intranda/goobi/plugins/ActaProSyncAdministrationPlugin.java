@@ -1073,14 +1073,17 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
     private void parseDocumentMetadata(Document doc, IEadEntry entry) {
         DocumentBlock block = doc.getBlock();
 
+        // shared for the complete document, so that repeated ACTApro fields fill a repeatable ead field instead of overwriting it
+        Set<IMetadataField> filledFields = NodeApi.newFilledFieldsCollector();
+
         for (DocumentField field : block.getFields()) {
 
             String fieldType = field.getType();
             // find ead metadata name
 
-            DocumentField matchedField = null;
             // first check, if field name is used in a group // has sub fields
             for (MetadataMapping mm : actaProConfig.getMetadataFields()) {
+                DocumentField matchedField = null;
                 if (mm.getJsonGroupType().equals(fieldType)) {
                     for (DocumentField subfield : field.getFields()) {
                         String subType = subfield.getType();
@@ -1094,7 +1097,7 @@ public class ActaProSyncAdministrationPlugin implements IAdministrationPlugin, I
                 }
 
                 if (matchedField != null) {
-                    NodeApi.addMetadataValue(entry, mm, matchedField);
+                    NodeApi.addMetadataValue(entry, mm, matchedField, filledFields);
                 }
             }
         }

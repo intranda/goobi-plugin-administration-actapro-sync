@@ -3,9 +3,12 @@ package io.goobi.api.job.actapro.model;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.apache.commons.dbutils.QueryRunner;
 import org.apache.commons.dbutils.ResultSetHandler;
@@ -24,6 +27,29 @@ public class NodeApi {
     private static final java.util.regex.Pattern VALID_XML_ELEMENT_NAME = java.util.regex.Pattern.compile("^[a-zA-Z_][a-zA-Z0-9_\\-\\.]*$");
 
     public static void addMetadataValue(IEadEntry entry, MetadataMapping matchedMapping, DocumentField matchedField) {
+        addMetadataValue(entry, matchedMapping, matchedField, newFilledFieldsCollector());
+    }
+
+    /**
+     * Creates the collector that has to be re-used for all fields of a single ACTApro document, see
+     * {@link #addMetadataValue(IEadEntry, MetadataMapping, DocumentField, Set)}. The set compares by identity because the metadata fields are
+     * mutated while they get filled.
+     */
+    public static Set<IMetadataField> newFilledFieldsCollector() {
+        return Collections.newSetFromMap(new IdentityHashMap<>());
+    }
+
+    /**
+     * Write the value of an ACTApro document field into the matching ead metadata field.
+     *
+     * @param entry the ead node to fill
+     * @param matchedMapping the configured mapping between ACTApro field and ead field
+     * @param matchedField the ACTApro field holding the value
+     * @param filledFields collects all ead fields that were already written during the import of the current document. Repeatable fields are
+     *            emptied on their first write and get an additional value on every following write, so that repeated ACTApro fields end up as
+     *            repeated ead metadata instead of overwriting each other.
+     */
+    public static void addMetadataValue(IEadEntry entry, MetadataMapping matchedMapping, DocumentField matchedField, Set<IMetadataField> filledFields) {
         String value = matchedField.getPlainValue();
         if (StringUtils.isBlank(value)) {
             value = matchedField.getValue();
@@ -33,37 +59,37 @@ public class NodeApi {
             case "1":
                 for (IMetadataField emf : entry.getIdentityStatementAreaList()) {
                     // add/replace value
-                    saveValue(matchedMapping, value, emf);
+                    saveValue(matchedMapping, value, emf, filledFields);
                 }
                 break;
             case "2":
                 for (IMetadataField emf : entry.getContextAreaList()) {
-                    saveValue(matchedMapping, value, emf);
+                    saveValue(matchedMapping, value, emf, filledFields);
                 }
                 break;
             case "3":
                 for (IMetadataField emf : entry.getContentAndStructureAreaAreaList()) {
-                    saveValue(matchedMapping, value, emf);
+                    saveValue(matchedMapping, value, emf, filledFields);
                 }
                 break;
             case "4":
                 for (IMetadataField emf : entry.getAccessAndUseAreaList()) {
-                    saveValue(matchedMapping, value, emf);
+                    saveValue(matchedMapping, value, emf, filledFields);
                 }
                 break;
             case "5":
                 for (IMetadataField emf : entry.getAlliedMaterialsAreaList()) {
-                    saveValue(matchedMapping, value, emf);
+                    saveValue(matchedMapping, value, emf, filledFields);
                 }
                 break;
             case "6":
                 for (IMetadataField emf : entry.getNotesAreaList()) {
-                    saveValue(matchedMapping, value, emf);
+                    saveValue(matchedMapping, value, emf, filledFields);
                 }
                 break;
             case "7":
                 for (IMetadataField emf : entry.getDescriptionControlAreaList()) {
-                    saveValue(matchedMapping, value, emf);
+                    saveValue(matchedMapping, value, emf, filledFields);
                 }
                 break;
         }
@@ -86,28 +112,41 @@ public class NodeApi {
     }
 
     public static void saveValue(MetadataMapping matchedMapping, String value, IMetadataField emf) {
+        saveValue(matchedMapping, value, emf, newFilledFieldsCollector());
+    }
+
+    public static void saveValue(MetadataMapping matchedMapping, String value, IMetadataField emf, Set<IMetadataField> filledFields) {
         if (StringUtils.isNotBlank(matchedMapping.getEadGroup())) {
             if (emf.getName().equals(matchedMapping.getEadGroup())) {
                 IMetadataGroup grp = emf.getGroups().get(0);
                 for (IMetadataField f : grp.getFields()) {
                     if (f.getName().equals(matchedMapping.getEadField())) {
-                        if (!f.getValues().isEmpty()) {
-                            f.getValues().get(0).setValue(value);
-                        } else {
-                            f.addValue();
-                            f.getValues().get(0).setValue(value);
-                        }
+                        setFieldValue(f, value, filledFields);
                     }
                 }
             }
         } else if (emf.getName().equals(matchedMapping.getEadField())) {
-            if (emf.getValues() != null && !emf.getValues().isEmpty()) {
-                emf.getValues().get(0).setValue(value);
-            } else {
-                emf.addValue();
-                emf.getValues().get(0).setValue(value);
-            }
+            setFieldValue(emf, value, filledFields);
         }
+    }
+
+    private static void setFieldValue(IMetadataField field, String value, Set<IMetadataField> filledFields) {
+        boolean firstValueOfCurrentImport = filledFields.add(field);
+
+        if (field.isRepeatable()) {
+            if (firstValueOfCurrentImport && field.getValues() != null) {
+                // drop the values of a previous import run, otherwise every sync would duplicate them
+                field.getValues().clear();
+            }
+            field.addValue();
+            field.getValues().get(field.getValues().size() - 1).setValue(value);
+            return;
+        }
+
+        if (field.getValues() == null || field.getValues().isEmpty()) {
+            field.addValue();
+        }
+        field.getValues().get(0).setValue(value);
     }
 
     public static void saveNode(Integer id, ExtendedEadEntry entry) {
